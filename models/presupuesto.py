@@ -1,19 +1,42 @@
 from .database import get_db_connection
+from .articulo import Articulo
 
 class Presupuesto:
-    def __init__(self, nombre, costo_total):
+    def __init__(self, nombre):
         self.nombre = nombre
-        self.costo_total = costo_total
+        self.articulos = []
+        self.costo_total = 0.0
+
+    def agregar_articulo(self, articulo_id, cantidad=1):
+        articulo = Articulo.get_articulo(articulo_id)
+        if articulo:
+            self.articulos.append({"articulo": articulo, "cantidad": cantidad})
+            self.calcular_costo_total()
+
+    def calcular_costo_total(self):
+        self.costo_total = sum(item['articulo']['valor_unitario'] * item['cantidad'] for item in self.articulos)
 
     @staticmethod
-    def create_presupuesto(nombre, costo_total):
+    def create_presupuesto(nombre, articulos):
+        presupuesto = Presupuesto(nombre)
+        for articulo_id, cantidad in articulos.items():
+            presupuesto.agregar_articulo(articulo_id, cantidad)
+
         conn = get_db_connection()
         if conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO presupuestos (nombre, costo_total) VALUES (%s, %s)",
-                (nombre, costo_total)
+                "INSERT INTO presupuestos (nombre) VALUES (%s) RETURNING id",
+                (presupuesto.nombre,)
             )
+            presupuesto_id = cursor.fetchone()[0]
+
+            for item in presupuesto.articulos:
+                cursor.execute(
+                    "INSERT INTO presupuesto_articulos (presupuesto_id, articulo_id, cantidad) VALUES (%s, %s, %s)",
+                    (presupuesto_id, item['articulo']['id'], item['cantidad'])
+                )
+
             conn.commit()
             conn.close()
 
@@ -22,30 +45,70 @@ class Presupuesto:
         conn = get_db_connection()
         if conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM presupuestos")
+            cursor.execute("""
+            SELECT p.id, p.nombre, 
+                COALESCE(SUM(pa.cantidad * a.valor_unitario), 0) AS costo_total
+            FROM presupuestos p
+            LEFT JOIN presupuesto_articulos pa ON p.id = pa.presupuesto_id
+            LEFT JOIN articulos a ON pa.articulo_id = a.id
+            GROUP BY p.id, p.nombre
+            """)
+            
             presupuestos = cursor.fetchall()
+            presupuestos_list = []
+
+            for presupuesto in presupuestos:
+                presupuestos_list.append({
+                    "id": presupuesto[0],
+                    "nombre": presupuesto[1],
+                    "costo_total": presupuesto[2]  # Ahora el costo_total se calcula correctamente
+                })
+
             conn.close()
-            return [{"id": p[0], "nombre": p[1], "costo_total": p[2]} for p in presupuestos]
-        
+            return presupuestos_list
+
+
     @staticmethod
     def get_presupuesto(id):
         conn = get_db_connection()
         if conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM presupuestos WHERE id = %s", (id,))
-            presupuesto = cursor.fetchone()
-            conn.close()
-            return presupuesto
-        
+            presupuesto_data = cursor.fetchone()
+
+            if presupuesto_data:
+                presupuesto = Presupuesto(presupuesto_data[1])
+                presupuesto.costo_total = presupuesto_data[2]
+
+                cursor.execute("SELECT articulo_id, cantidad FROM presupuesto_articulos WHERE presupuesto_id = %s", (id,))
+                articulos_data = cursor.fetchall()
+
+                for articulo_id, cantidad in articulos_data:
+                    articulo = Articulo.get_articulo(articulo_id)
+                    if articulo:
+                        presupuesto.articulos.append({"articulo": articulo, "cantidad": cantidad})
+
+                conn.close()
+                return presupuesto
+            
     @staticmethod
-    def update_presupuesto(id, nombre, costo_total):
+    def update_presupuesto(id, nombre, articulos):
+        presupuesto = Presupuesto(nombre)
+        for articulo_id, cantidad in articulos.items():
+            presupuesto.agregar_articulo(articulo_id, cantidad)
+
         conn = get_db_connection()
         if conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE presupuestos SET nombre = %s, costo_total = %s WHERE id = %s",
-                (nombre, costo_total, id)
-            )
+            cursor.execute("UPDATE presupuestos SET nombre = %s, costo_total = %s WHERE id = %s", (presupuesto.nombre, presupuesto.costo_total, id))
+            cursor.execute("DELETE FROM presupuesto_articulos WHERE presupuesto_id = %s", (id,))
+
+            for item in presupuesto.articulos:
+                cursor.execute(
+                    "INSERT INTO presupuesto_articulos (presupuesto_id, articulo_id, cantidad) VALUES (%s, %s, %s)",
+                    (id, item['articulo']['id'], item['cantidad'])
+                )
+
             conn.commit()
             conn.close()
 
@@ -54,68 +117,7 @@ class Presupuesto:
         conn = get_db_connection()
         if conn:
             cursor = conn.cursor()
+            cursor.execute("DELETE FROM presupuesto_articulos WHERE presupuesto_id = %s", (id,))
             cursor.execute("DELETE FROM presupuestos WHERE id = %s", (id,))
             conn.commit()
             conn.close()
-
-class Articulo:
-    def __init__(self, codigo, descripcion, unidad, valor_unitario):
-        self.codigo = codigo
-        self.descripcion = descripcion
-        self.unidad = unidad
-        self.valor_unitario = valor_unitario
-
-    @staticmethod
-    def create_articulo(codigo, descripcion, unidad, valor_unitario):
-        conn = get_db_connection()
-        if conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO articulos (codigo, descripcion, unidad, valor_unitario) VALUES (%s, %s, %s, %s)",
-                (codigo, descripcion, unidad, valor_unitario)
-            )
-            conn.commit()
-            conn.close()
-
-    @staticmethod
-    def get_articulos():
-        conn = get_db_connection()
-        if conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM articulos")
-            articulos = cursor.fetchall()
-            conn.close()
-            return [{"id": a[0], "codigo": a[1], "descripcion": a[2], "unidad": a[3], "valor_unitario": a[4]} for a in articulos]
-        
-    @staticmethod
-    def get_articulo(id):
-        conn = get_db_connection()
-        if conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM articulos WHERE id = %s", (id,))
-            articulo = cursor.fetchone()
-            conn.close()
-            return articulo
-        
-    @staticmethod
-    def update_articulo(id, codigo, descripcion, unidad, valor_unitario):
-        conn = get_db_connection()
-        if conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE articulos SET codigo = %s, descripcion = %s, unidad = %s, valor_unitario = %s WHERE id = %s",
-                (codigo, descripcion, unidad, valor_unitario, id)
-            )
-            conn.commit()
-            conn.close()
-
-    @staticmethod
-    def delete_articulo(id):
-        conn = get_db_connection()
-        if conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM articulos WHERE id = %s", (id,))
-            conn.commit()
-            conn.close()
-
-    
