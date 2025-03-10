@@ -3,24 +3,36 @@ import re
 import pandas as pd
 import tabula
 
-# --- PARTE 1: Extracción de análisis unitarios (NO SE MODIFICA) ---
+# Lista de unidades analisis unitarios
+UNITS = [
+    'HC','GLB','VJE','M3','M2','UND','HRS','KG','KLS','LBS','ML','DIA',
+    'CM3','CJO','JGO','SC','M3K','GLL','ROL','CC','HR','PHC','G','K',
+    'KG.','GL','LTS','U/D','CUN','GLN','HH','LAM','PLI','BTO','GLS','CAN',
+    'RLL','PAR','ARR','VAR','PG2','CAR','ATD','KLL','T/K','MES','CAJ','M/D',
+    'PTO','CM2','C/K','KLK','M/K'
+]
 
+unit_list = [
+    'HC','GLB','VJE','M3','M2','UND','HRS','KG','KLS','LBS','ML','DIA','CM3','CJO','JGO','SC','M3K','GLL','ROL','VJE','CC','HR','PHC','G','K','DIA','KG','KG.','GL','LTS','U/D','CUN','GLN','HH','LAM','PLI','BTO','GLS','CAN','RLL','PAR','ARR','VAR','PG2','CAR','ATD','KLL','T/K','MES','CAJ'
+]
+
+# ---------------------------
+# Extracción de análisis unitarios
+# ---------------------------
 def extract_analysis_units(pdf_path):
     """
-    Extrae 'análisis unitarios' del PDF. No se modifica esta parte
-    según lo solicitado.
+    Extrae los análisis unitarios del PDF.
+    Se asume que cada línea de análisis tiene el formato:
+        CODE-DESCRIPCIÓN [Unidad]
+    Si la última palabra de la descripción está en la lista UNITS se extrae como unidad.
+    Luego, en líneas posteriores se busca el valor total (precedido por '$').
     """
+    # Extraer todas las tablas del PDF
     tables = tabula.read_pdf(pdf_path, pages='all', multiple_tables=True, stream=True)
-    
     analysis_units = []
     current_analysis = None
-    
-    # Patrón para detectar algo tipo: 01-01-01-LO QUE SEA
-    regex_analisis = re.compile(r'^(\d{2}-\d{2}-\d{2})-(.+)$')
-    
-    # Patrón para detectar valor total con $
-    regex_total = re.compile(r'\$([\d\.,]+)')
-    
+
+    # Concatenar todas las tablas en una lista de líneas
     lines = []
     for tbl in tables:
         tbl = tbl.fillna('')
@@ -29,45 +41,56 @@ def extract_analysis_units(pdf_path):
             row_text = re.sub(r'\s+', ' ', row_text).strip()
             if row_text:
                 lines.append(row_text)
-    
+
+    # Regex para detectar el encabezado del análisis unitario
+    regex_analisis = re.compile(r'^(\d{2}-\d{2}-\d{2})-(.+)$')
+    # Regex para detectar el valor total (con $)
+    regex_total = re.compile(r'\$([\d,\.]+)')
     looking_for_total = False
-    
+
     for line in lines:
-        # 1) Detectar la línea con el código de análisis (##-##-##-)
         match_analisis = regex_analisis.match(line)
         if match_analisis:
             code = match_analisis.group(1)
             desc_line = match_analisis.group(2).strip()
-            
+            tokens = desc_line.split()
+            # Si el último token está en UNITS, se asume que es la unidad
+            if tokens and tokens[-1].upper() in UNITS:
+                unit = tokens[-1].upper()
+                description = " ".join(tokens[:-1])
+            else:
+                unit = ''
+                description = desc_line
+
             current_analysis = {
                 'codigo': code,
-                'descripcion': desc_line,
-                'unidad': '',
+                'descripcion': description,
+                'unidad': unit,
                 'total': 0.0
             }
             analysis_units.append(current_analysis)
             looking_for_total = True
             continue
-        
-        # 2) Buscar valor total ($...) en las líneas siguientes
+
         if looking_for_total and current_analysis:
             match_total = regex_total.search(line)
             if match_total:
-                val_str = match_total.group(1).replace('.', '').replace(',', '.')
+                total_str = match_total.group(1).replace(',', '')
                 try:
-                    val = float(val_str)
+                    total_val = float(total_str)
                 except ValueError:
-                    val = 0.0
-                current_analysis['total'] = val
+                    total_val = 0.0
+                current_analysis['total'] = total_val
                 looking_for_total = False
                 current_analysis = None
                 continue
-    
+
     return analysis_units
 
-
-# --- PARTE 2: Extracción/Parseo de recursos (MODIFICADA) ---
-
+# ---------------------------
+# Extracción de recursos (Relaciones)
+# Se deja la lógica original de relaciones, sin cambios
+# ---------------------------
 def parse_resource_line(line):
     """
     Intenta parsear un 'recurso' en la forma:
@@ -257,8 +280,9 @@ def extract_resources(pdf_path, analysis_units):
     return resources_mapping
 
 
-# --- CREACIÓN DE DATAFRAMES Y GUARDO CSV ---
-
+# ---------------------------
+# Creación de DataFrames y guardado a CSV
+# ---------------------------
 def create_dataframes(analysis_units, resources):
     df_analysis = pd.DataFrame(analysis_units)
     df_resources = pd.DataFrame(resources)
