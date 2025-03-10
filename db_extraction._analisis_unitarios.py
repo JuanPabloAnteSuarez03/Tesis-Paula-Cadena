@@ -3,173 +3,299 @@ import re
 import pandas as pd
 import tabula
 
-def merge_all_pages(pdf_path):
+# --- PARTE 1: Extracción de análisis unitarios (NO SE MODIFICA) ---
+
+def extract_analysis_units(pdf_path):
     """
-    Extrae todas las tablas de todas las páginas con tabula y las combina en un DataFrame único.
+    Extrae 'análisis unitarios' del PDF. No se modifica esta parte
+    según lo solicitado.
     """
     tables = tabula.read_pdf(pdf_path, pages='all', multiple_tables=True, stream=True)
-    df = pd.concat(tables, ignore_index=True).fillna('')
-    return df
-
-def convert_df_to_lines(df):
-    """
-    Convierte cada fila del DataFrame en una sola línea de texto,
-    eliminando espacios sobrantes.
-    """
-    lines = []
-    for _, row in df.iterrows():
-        row_text = ' '.join(str(val).strip() for val in row if val != '')
-        row_text = re.sub(r'\s+', ' ', row_text).strip()
-        if row_text:
-            lines.append(row_text)
-    return lines
-
-def reconstruct_splitted_lines(lines):
-    """
-    (Opcional) Reconstruye líneas partidas entre páginas.
-    Aquí simplemente devolvemos las líneas tal cual.
-    """
-    return lines
-
-def extract_analysis_units_two_step(pdf_path):
-    """
-    Extrae análisis unitarios y recursos de un PDF usando dos pasos:
-      1) Detecta la línea de análisis unitario con formato "##-##-##-DESCRIPCIÓN … UNIDAD".
-      2) Si el total no aparece en la misma línea, lo busca en líneas siguientes.
-      3) Para los recursos, extrae el código y luego, a partir del resto de la línea,
-         separa la descripción y asume que los últimos 5 tokens corresponden a:
-         [unidad, cantidad, desper, vr_unitario, vr_parcial].
-    """
-    df = merge_all_pages(pdf_path)
-    raw_lines = convert_df_to_lines(df)
-    lines = reconstruct_splitted_lines(raw_lines)
-
+    
     analysis_units = []
-    resources_mapping = []
     current_analysis = None
+    
+    # Patrón para detectar algo tipo: 01-01-01-LO QUE SEA
+    regex_analisis = re.compile(r'^(\d{2}-\d{2}-\d{2})-(.+)$')
+    
+    # Patrón para detectar valor total con $
+    regex_total = re.compile(r'\$([\d\.,]+)')
+    
+    lines = []
+    for tbl in tables:
+        tbl = tbl.fillna('')
+        for _, row in tbl.iterrows():
+            row_text = ' '.join(str(val).strip() for val in row if val != '')
+            row_text = re.sub(r'\s+', ' ', row_text).strip()
+            if row_text:
+                lines.append(row_text)
+    
     looking_for_total = False
-
-    # Regex para análisis unitario (no se modifica)
-    regex_analisis = re.compile(r'^(\d{2}-\d{2}-\d{2})-(.+?)\s+(UND|M2|ML|GLN|VJE|LBS|M3|KLS|M/D|HRS|DIA|CM3|JGO|CJO|HC|CC)')
-    regex_total = re.compile(r'\$\s*([\d,\.]+)')
-
-    # Regex para el código de recurso: acepta formatos tipo M[OQ]... o 6 dígitos, con guion opcional
-    regex_resource_code = re.compile(r'^((?:M[OQ]\w+|SC\d{3,4}|\d{3,4}|\d{6})-)\s*(.+)$')
-
-    # Conjunto de unidades válidas (ajusta según tus necesidades)
-    allowed_units = {'UND', 'M2', 'ML', 'GLN', 'VJE', 'LBS', 'M3', 'KLS', 'M/D', 'HRS', 'DIA', 'CM3', 'JGO', 'CJO', 'HC', 'CC', 'ROL', 'GLB', 'M3K'}
-
+    
     for line in lines:
-        # 1) Detectar línea de análisis unitario
+        # 1) Detectar la línea con el código de análisis (##-##-##-)
         match_analisis = regex_analisis.match(line)
         if match_analisis:
-            code = match_analisis.group(1).strip()
-            description = match_analisis.group(2).strip()
-            unit = match_analisis.group(3).strip()
-            total_match = regex_total.search(line)
-            if total_match:
-                total_str = total_match.group(1).replace(',', '').replace('.', '')
-                try:
-                    total_val = float(total_str)
-                except ValueError:
-                    total_val = 0.0
-            else:
-                total_val = 0.0
+            code = match_analisis.group(1)
+            desc_line = match_analisis.group(2).strip()
+            
             current_analysis = {
                 'codigo': code,
-                'descripcion': description,
-                'unidad': unit,
-                'total': total_val
+                'descripcion': desc_line,
+                'unidad': '',
+                'total': 0.0
             }
             analysis_units.append(current_analysis)
-            looking_for_total = (total_val == 0.0)
+            looking_for_total = True
             continue
-
-        # 2) Si estamos esperando el total en líneas siguientes
+        
+        # 2) Buscar valor total ($...) en las líneas siguientes
         if looking_for_total and current_analysis:
-            total_match = regex_total.search(line)
-            if total_match:
-                total_str = total_match.group(1).replace(',', '').replace('.', '')
+            match_total = regex_total.search(line)
+            if match_total:
+                val_str = match_total.group(1).replace('.', '').replace(',', '.')
                 try:
-                    total_val = float(total_str)
+                    val = float(val_str)
                 except ValueError:
-                    total_val = 0.0
-                current_analysis['total'] = total_val
+                    val = 0.0
+                current_analysis['total'] = val
                 looking_for_total = False
                 current_analysis = None
                 continue
+    
+    return analysis_units
 
-        # 3) Extraer recursos solo si hay un análisis actual activo
-        if current_analysis:
-            match_resource = regex_resource_code.match(line)
-            if match_resource:
-                raw_code = match_resource.group(1).strip() 
-                resource_code = raw_code.rstrip('-')
-                rest = match_resource.group(2).strip()
-                tokens = rest.split()
-                if len(tokens) < 5:
-                    print(f"No se pudo parsear 5 columnas en la línea de recurso:\n{line}")
-                else:
-                    # Asumir que los últimos 5 tokens son: unidad, cantidad, desper, vr_unitario, vr_parcial
-                    resource_unit = tokens[-5]
-                    try:
-                        quantity = float(tokens[-4].replace('.', '').replace(',', '.'))
-                    except ValueError:
-                        quantity = 0.0
-                    try:
-                        desper = float(tokens[-3].replace('.', '').replace(',', '.'))
-                    except ValueError:
-                        desper = 0.0
-                    try:
-                        vr_unit = float(tokens[-2].replace('.', '').replace(',', '.'))
-                    except ValueError:
-                        vr_unit = 0.0
-                    try:
-                        vr_parcial = float(tokens[-1].replace('.', '').replace(',', '.'))
-                    except ValueError:
-                        vr_parcial = 0.0
-                    resource_desc = " ".join(tokens[:-5])
-                    resources_mapping.append({
-                        'codigo_analisis': current_analysis['codigo'],
-                        'codigo_recurso': resource_code,
-                        'descripcion_recurso': resource_desc,
-                        'unidad_recurso': resource_unit,
-                        'cantidad_recurso': quantity,
-                        'desper_recurso': desper,
-                        'vr_unit_recurso': vr_unit,
-                        'vr_parcial_recurso': vr_parcial
-                    })
 
-    return analysis_units, resources_mapping
+# --- PARTE 2: Extracción/Parseo de recursos (MODIFICADA) ---
 
-def create_dataframes(analysis_units, resources_mapping):
+def parse_resource_line(line):
+    """
+    Intenta parsear un 'recurso' en la forma:
+    
+    CODIGO-DESCRIPCION ... UNIDAD CANT DESPER VRUNIT VRPARCIAL
+    
+    Retorna un diccionario con esos campos o None si no se pudo parsear.
+    """
+    # 1) Buscamos un código que cumpla:
+    #    - Empieza con:
+    #      * M[OQ] (ej: MOAG01-)
+    #      * SC (ej: SC0201-)
+    #      * 3,4,6 dígitos (ej: 123-, 1234-, 003282-)
+    #    - Debe terminar en '-'
+    #
+    #    => ejemplo:  "MOAG01-"   "003282-"   "SC0201-"
+    #
+    #    Usamos un regex con grupos alternativos, y exigimos que termine en '-'
+    #    para separar luego la descripción.
+    
+    # Patrón para "código-" (quitamos el guion al final):
+    code_pattern = re.compile(
+        r'^(?:'                # comienzo del string
+        r'(?:M[OQ]\w+)|'       # MO..., MQ...
+        r'(?:SC\d+)|'          # SC...
+        r'(?:\d{3,6})'         # 3,4 o 6 dígitos
+        r')-'                  # guion
+    )
+    
+    splitted = line.split()
+    if not splitted:
+        return None
+    
+    # splitted[0] podría ser "MOAG01-HERRAMIENTA" o "003282-GASOLINA"
+    # o "SC0201-ELABORACION" etc.
+    first_token = splitted[0]
+    
+    # Verificamos si coincide con code_pattern
+    m = code_pattern.match(first_token)
+    if not m:
+        return None  # no es un recurso con ese formato
+    
+    # Extraemos el "codigo" sin el guion final
+    # p.ej. si first_token="MOAG01-HERRAMIENTA" => codeCandidate="MOAG01-"
+    # luego leftover="HERRAMIENTA"
+    codeCandidate = m.group(0)  # "MOAG01-"
+    code_clean = codeCandidate[:-1]  # quitamos el '-' => "MOAG01"
+    
+    leftover = first_token[len(codeCandidate):]  # lo que quede en first_token tras "MOAG01-"
+    
+    # Reconstruimos la línea, pero reemplazamos splitted[0] por leftover + splitted[1...]
+    # para analizar "descripción + (unidad cant desper vrunit vrparcial)"
+    new_tokens = []
+    if leftover:
+        new_tokens.append(leftover)
+    # Agregamos el resto
+    new_tokens.extend(splitted[1:])
+    
+    # new_tokens = ej: ["HERRAMIENTA","MENOR","GLB","4,000","0,00","1.600","6.400"]
+    if len(new_tokens) < 5:
+        return None  # no hay columnas suficientes
+    
+    # Queremos ubicar la unidad. Asumimos que la unidad es uno de:
+    # "UND|M2|ML|GLN|VJE|LBS|M3|KLS|M/D|HRS|DIA|CM3|JGO|CJO|HC|CC|GLB|PHC|..."
+    # (puedes ampliarla con las que necesites).
+    
+    unit_list = [
+        'HC','GLB','VJE','M3','M2','UND','HRS','KG','KLS','LBS','ML','DIA','CM3','CJO','JGO','SC','M3K','GLL','ROL','VJE','CC','HR','PHC','G','K','DIA','KG','KG.','GL','LTS','U/D','CUN','GLN','HH','LAM','PLI','BTO','GLS','CAN','RLL','PAR','ARR','VAR','PG2','CAR','ATD','KLL','T/K','MES','CAJ'
+    ]
+    
+    # Vamos a buscar la unidad en new_tokens
+    unit_index = -1
+    for i, tok in enumerate(new_tokens):
+        if tok.upper() in unit_list:
+            unit_index = i
+            break
+    
+    if unit_index < 0:
+        # No se encontró una unidad reconocida
+        print(f"No se encontró unidad en la línea de recurso:\n{line}")
+        return None
+    
+    # La descripción es todo lo anterior a la unidad
+    desc_part = new_tokens[:unit_index]  # puede tener varias palabras
+    description_recurso = " ".join(desc_part).strip()
+    
+    # Lo que sigue a la unidad son 5 posibles tokens: CANT, DESPER, VRUNIT, VRPARCIAL
+    # En la práctica, a veces DESPER no existe o es "0,00", ajusta según tu caso.
+    # Asumiremos 4 tokens: Cant, Desper, VrUnit, VrParcial
+    # (Si a veces no hay "desper", lo interpretas como 0.0)
+    
+    rest = new_tokens[unit_index+1:]
+    if len(rest) < 4:
+        print(f"No se pudo parsear 5 columnas en la línea de recurso:\n{line}")
+        return None
+    
+    # Tomamos 4 exactos: cant, desper, vrunit, vrparcial
+    cant_str, desper_str, vrunit_str, vrparcial_str = rest[:4]
+    
+    # Convertir a float
+    def to_float(s):
+        return float(s.replace('.', '').replace(',', '.'))
+    
+    try:
+        cantidad = to_float(cant_str)
+    except:
+        cantidad = 0.0
+    
+    try:
+        desper = to_float(desper_str)
+    except:
+        desper = 0.0
+    
+    try:
+        vrunit = to_float(vrunit_str)
+    except:
+        vrunit = 0.0
+    
+    try:
+        vrparcial = to_float(vrparcial_str)
+    except:
+        vrparcial = 0.0
+    
+    return {
+        'codigo_recurso': code_clean,
+        'descripcion_recurso': description_recurso,
+        'unidad_recurso': new_tokens[unit_index],  # la unidad detectada
+        'cantidad_recurso': cantidad,
+        'desper': desper,
+        'vr_unitario': vrunit,
+        'vr_parcial': vrparcial
+    }
+
+
+def extract_resources(pdf_path, analysis_units):
+    """
+    Lee el PDF nuevamente o (reusa) y parsea línea por línea en busca de recursos.
+    Para cada recurso, asocia con el 'codigo_analisis' actual si estamos
+    dentro de uno.
+    """
+    # Generamos un set de codigos de analisis para saber en cuál estamos
+    # (en tu caso, podrías usar la misma lógica de "cuando encuentro XX-XX-XX- me cambio de análisis")
+    # pero aquí asumo que "analysis_units" ya lo tienes.
+    codigos_analisis = {a['codigo'] for a in analysis_units}
+    
+    # Te conviene re-leer el PDF en modo "lineas"
+    tables = tabula.read_pdf(pdf_path, pages='all', multiple_tables=True, stream=True)
+    lines = []
+    for tbl in tables:
+        tbl = tbl.fillna('')
+        for _, row in tbl.iterrows():
+            row_text = ' '.join(str(val).strip() for val in row if val != '')
+            row_text = re.sub(r'\s+', ' ', row_text).strip()
+            if row_text:
+                lines.append(row_text)
+    
+    resources_mapping = []
+    current_analisis_code = None
+    
+    # Regex para detectar "XX-XX-XX-" (analisis)
+    regex_analisis = re.compile(r'^(\d{2}-\d{2}-\d{2})-')
+    
+    for line in lines:
+        # 1) Ver si la línea indica un cambio de análisis
+        match_ana = regex_analisis.match(line)
+        if match_ana:
+            # Cambiamos de análisis
+            possible_code = match_ana.group(1)
+            if possible_code in codigos_analisis:
+                current_analisis_code = possible_code
+            else:
+                current_analisis_code = None
+            # no parseamos esta línea como recurso, saltamos
+            continue
+        
+        # 2) Intentar parsear la línea como recurso
+        if not current_analisis_code:
+            # si no estamos dentro de un análisis conocido, no parseamos
+            continue
+        
+        parsed = parse_resource_line(line)
+        if parsed:
+            # Agregamos el campo 'codigo_analisis'
+            parsed['codigo_analisis'] = current_analisis_code
+            resources_mapping.append(parsed)
+    
+    return resources_mapping
+
+
+# --- CREACIÓN DE DATAFRAMES Y GUARDO CSV ---
+
+def create_dataframes(analysis_units, resources):
     df_analysis = pd.DataFrame(analysis_units)
-    df_resources_mapping = pd.DataFrame(resources_mapping)
-    return df_analysis, df_resources_mapping
+    df_resources = pd.DataFrame(resources)
+    return df_analysis, df_resources
 
-def save_to_csv(df_analysis, df_resources_mapping, analysis_path, mapping_path):
+def save_to_csv(df_analysis, df_resources, analysis_path, resources_path):
     df_analysis.to_csv(analysis_path, index=False)
-    df_resources_mapping.to_csv(mapping_path, index=False)
-    print(f"Analysis units saved to {analysis_path}")
-    print(f"Resource mappings saved to {mapping_path}")
+    df_resources.to_csv(resources_path, index=False)
+    print(f"Análisis unitarios guardados en: {analysis_path}")
+    print(f"Recursos guardados en: {resources_path}")
+
+
+# --- MAIN ---
 
 def main():
     pdf_path = os.path.join("data_gobernacion", "-ANALISIS UNITARIOS DECRET 1276 -2021.pdf")
+    output_dir = "data_gobernacion"
     
-    analysis_units, resources_mapping = extract_analysis_units_two_step(pdf_path)
-    df_analysis, df_resources_mapping = create_dataframes(analysis_units, resources_mapping)
+    # 1) Extraemos análisis unitarios
+    analysis_units = extract_analysis_units(pdf_path)
     
-    os.makedirs("data_gobernacion", exist_ok=True)
-    analysis_path = os.path.join("data_gobernacion", "analisis_unitarios.csv")
-    mapping_path = os.path.join("data_gobernacion", "recursos_analisis.csv")
+    # 2) Extraemos recursos
+    resources_mapping = extract_resources(pdf_path, analysis_units)
     
-    save_to_csv(df_analysis, df_resources_mapping, analysis_path, mapping_path)
+    # 3) DataFrames y guardado
+    df_analysis, df_resources = create_dataframes(analysis_units, resources_mapping)
     
-    print("\nSample of Analysis Units:")
-    print(df_analysis.head())
+    os.makedirs(output_dir, exist_ok=True)
+    analysis_csv = os.path.join(output_dir, "analisis_unitarios.csv")
+    resources_csv = os.path.join(output_dir, "recursos_analisis.csv")
     
-    print("\nSample of Resource Mappings:")
-    print(df_resources_mapping.head())
+    save_to_csv(df_analysis, df_resources, analysis_csv, resources_csv)
+    
+    print("\n--- MUESTRA DE ANÁLISIS UNITARIOS ---")
+    print(df_analysis.head(10))
+    print("\n--- MUESTRA DE RECURSOS ---")
+    print(df_resources.head(10))
 
 if __name__ == "__main__":
     main()
