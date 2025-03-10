@@ -23,17 +23,17 @@ class PresupuestoView(QWidget):
         layout.addWidget(self.btn_guardar)
 
         # Dropdown para seleccionar artículos
-        self.articulos_dropdown = QComboBox()
-        layout.addWidget(self.articulos_dropdown)
+        self.recursos_dropdown = QComboBox()
+        layout.addWidget(self.recursos_dropdown)
 
         # Botón para agregar artículos a la lista
-        btn_agregar_articulo = QPushButton("Agregar Artículo")
-        btn_agregar_articulo.clicked.connect(self.agregar_articulo)
-        layout.addWidget(btn_agregar_articulo)
+        btn_agregar_recurso = QPushButton("Agregar Recurso")
+        btn_agregar_recurso.clicked.connect(self.agregar_recurso)
+        layout.addWidget(btn_agregar_recurso)
 
         # Lista para mostrar los artículos seleccionados
-        self.lista_articulos = QListWidget()
-        layout.addWidget(self.lista_articulos)
+        self.lista_recursos = QListWidget()
+        layout.addWidget(self.lista_recursos)
 
         # Lista de presupuestos existentes
         self.lista_presupuestos = QListWidget()
@@ -41,18 +41,18 @@ class PresupuestoView(QWidget):
 
         self.setLayout(layout)
         self.cargar_presupuestos()
-        self.cargar_articulos()
+        self.cargar_recursos()
 
     def guardar_presupuesto(self):
         nombre = self.input_nombre.text()
-        articulos = {}
-        for i in range(self.lista_articulos.count()):
-            articulo_texto = self.lista_articulos.item(i).text()
-            articulo_id = self.lista_articulos.item(i).data(256)  # 256 es el rol de usuario en PyQt
-            cantidad, ok = QInputDialog.getDouble(self, "Cantidad", f"Cantidad para {articulo_texto}", 1, 0, 100, 1)
+        recursos = {}
+        for i in range(self.lista_recursos.count()):
+            recurso_texto = self.lista_recursos.item(i).text()
+            recurso_id = self.lista_recursos.item(i).data(256)  # 256 es el rol de usuario en PyQt
+            cantidad, ok = QInputDialog.getDouble(self, "Cantidad", f"Cantidad para {recurso_texto}", 1, 0, 100, 1)
             if ok:
-                articulos[articulo_id] = cantidad
-        self.controller.crear_presupuesto(nombre, articulos)
+                recursos[recurso_id] = cantidad
+        self.controller.crear_presupuesto(nombre, recursos)
         self.cargar_presupuestos()
 
     def cargar_presupuestos(self):
@@ -61,16 +61,16 @@ class PresupuestoView(QWidget):
         for p in presupuestos:
             self.lista_presupuestos.addItem(f"{p['nombre']} - ${p['costo_total']}")
 
-    def cargar_articulos(self):
-        self.articulos_dropdown.clear()
-        articulos = self.controller.obtener_articulos()
-        for articulo in articulos:
-            self.articulos_dropdown.addItem(f"{articulo['codigo']} - {articulo['descripcion']}", articulo['id'])
+    def cargar_recursos(self):
+        self.recursos_dropdown.clear()
+        recursos = self.controller.obtener_recursos()
+        for recurso in recursos:
+            self.recursos_dropdown.addItem(f"{recurso['codigo']} - {recurso['descripcion']}", recurso['id'])
 
-    def agregar_articulo(self):
-        articulo_id = self.articulos_dropdown.currentData()
-        articulo_texto = self.articulos_dropdown.currentText()
-        if articulo_id:
-            item = f"{articulo_texto}"
-            self.lista_articulos.addItem(item)
-            self.lista_articulos.item(self.lista_articulos.count() - 1).setData(256, articulo_id)
+    def agregar_recurso(self):
+        recurso_id = self.recursos_dropdown.currentData()
+        recurso_texto = self.recursos_dropdown.currentText()
+        if recurso_id:
+            item = f"{recurso_texto}"
+            self.lista_recursos.addItem(item)
+            self.lista_recursos.item(self.lista_recursos.count() - 1).setData(256, recurso_id)

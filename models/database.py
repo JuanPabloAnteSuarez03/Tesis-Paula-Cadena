@@ -39,9 +39,9 @@ def crear_tablas():
             );
             """)
             
-            # Crear la tabla de articulos
+            # Crear la tabla de recursos
             cursor.execute("""
-            CREATE TABLE IF NOT EXISTS articulos (
+            CREATE TABLE IF NOT EXISTS recursos (
                 id SERIAL PRIMARY KEY,
                 codigo TEXT NOT NULL UNIQUE,
                 descripcion TEXT NOT NULL,
@@ -50,12 +50,12 @@ def crear_tablas():
             );
             """)
             
-            # Crear la tabla de relación entre presupuestos y artículos
+            # Crear la tabla de relación entre presupuestos y recursos
             cursor.execute("""
-            CREATE TABLE IF NOT EXISTS presupuesto_articulos (
+            CREATE TABLE IF NOT EXISTS presupuesto_recursos (
                 id SERIAL PRIMARY KEY,
                 presupuesto_id INTEGER REFERENCES presupuestos(id) ON DELETE CASCADE,
-                articulo_id INTEGER REFERENCES articulos(id) ON DELETE CASCADE,
+                recurso_id INTEGER REFERENCES recursos(id) ON DELETE CASCADE,
                 cantidad REAL NOT NULL DEFAULT 1
             );
             """)
@@ -78,7 +78,7 @@ def cargar_datos_desde_csv(csv_file):
     try:
         with conn.cursor() as cursor:
             # Verificar si la tabla ya contiene datos
-            cursor.execute("SELECT COUNT(*) FROM articulos;")
+            cursor.execute("SELECT COUNT(*) FROM recursos;")
             if cursor.fetchone()[0] > 0:
                 print("La tabla ya contiene datos. No se cargará el CSV.")
                 return
@@ -93,7 +93,7 @@ def cargar_datos_desde_csv(csv_file):
             for _, row in df.iterrows():
                 try:
                     cursor.execute("""
-                    INSERT INTO articulos (codigo, descripcion, unidad, valor_unitario)
+                    INSERT INTO recursos (codigo, descripcion, unidad, valor_unitario)
                     VALUES (%s, %s, %s, %s)
                     ON CONFLICT (codigo) DO NOTHING;
                     """, (row['Codigo'], row['Descripcion'], row['Unidad'], row['Valor Unitario']))
@@ -111,4 +111,4 @@ def cargar_datos_desde_csv(csv_file):
 
 # Ejecutar funciones
 crear_tablas()
-cargar_datos_desde_csv('data_gobernacion/articulos_unicos.csv')
+cargar_datos_desde_csv('data_gobernacion/recursos_unicos.csv')
