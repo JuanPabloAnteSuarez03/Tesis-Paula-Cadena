@@ -27,27 +27,18 @@ def convert_df_to_lines(df):
 def reconstruct_splitted_lines(lines):
     """
     (Opcional) Reconstruye líneas partidas entre páginas.
-    Ajusta según tu PDF si detectas que se parte la información.
+    Aquí simplemente devolvemos las líneas tal cual.
     """
-    merged_lines = []
-    i = 0
-    while i < len(lines):
-        current_line = lines[i]
-        # Aquí podrías agregar lógica para unir líneas si detectas que una línea
-        # termina sin ciertos tokens y la siguiente comienza con ellos.
-        merged_lines.append(current_line)
-        i += 1
-    return merged_lines
+    return lines
 
 def extract_analysis_units_two_step(pdf_path):
     """
-    Extrae análisis unitarios y recursos de un PDF usando una estrategia de dos pasos:
-      1) Detecta el análisis unitario con formato "##-##-##-DESCRIPCIÓN ... UNIDAD".
-      2) Busca el valor total (línea con '$') en la misma o en líneas siguientes.
-      3) Extrae los recursos utilizando:
-           - Un regex para obtener el código de recurso y el resto del string.
-           - Luego, se hace split de ese resto para identificar la descripción y, a partir del primer token que coincida con una unidad, extraer:
-             [descripción, unidad, cantidad, desper, vr_unitario, vr_parcial]
+    Extrae análisis unitarios y recursos de un PDF usando dos pasos:
+      1) Detecta la línea de análisis unitario con formato "##-##-##-DESCRIPCIÓN … UNIDAD".
+      2) Si el total no aparece en la misma línea, lo busca en líneas siguientes.
+      3) Para los recursos, extrae el código y luego, a partir del resto de la línea,
+         separa la descripción y asume que los últimos 5 tokens corresponden a:
+         [unidad, cantidad, desper, vr_unitario, vr_parcial].
     """
     df = merge_all_pages(pdf_path)
     raw_lines = convert_df_to_lines(df)
@@ -55,7 +46,6 @@ def extract_analysis_units_two_step(pdf_path):
 
     analysis_units = []
     resources_mapping = []
-
     current_analysis = None
     looking_for_total = False
 
@@ -63,10 +53,10 @@ def extract_analysis_units_two_step(pdf_path):
     regex_analisis = re.compile(r'^(\d{2}-\d{2}-\d{2})-(.+?)\s+(UND|M2|ML|GLN|VJE|LBS|M3|KLS|M/D|HRS|DIA|CM3|JGO|CJO|HC|CC)')
     regex_total = re.compile(r'\$\s*([\d,\.]+)')
 
-    # Regex para el código de recurso: acepta M[OQ]... o 6 dígitos, con un guion opcional
-    regex_resource_code = re.compile(r'^((?:M[OQ]\w+|\d{6}))\s*-?\s*(.+)$')
+    # Regex para el código de recurso: acepta formatos tipo M[OQ]... o 6 dígitos, con guion opcional
+    regex_resource_code = re.compile(r'^((?:M[OQ]\w+|SC\d{3,4}|\d{3,4}|\d{6})-)\s*(.+)$')
 
-    # Conjunto de unidades válidas (agrega las que necesites)
+    # Conjunto de unidades válidas (ajusta según tus necesidades)
     allowed_units = {'UND', 'M2', 'ML', 'GLN', 'VJE', 'LBS', 'M3', 'KLS', 'M/D', 'HRS', 'DIA', 'CM3', 'JGO', 'CJO', 'HC', 'CC', 'ROL', 'GLB', 'M3K'}
 
     for line in lines:
@@ -95,7 +85,7 @@ def extract_analysis_units_two_step(pdf_path):
             looking_for_total = (total_val == 0.0)
             continue
 
-        # 2) Si estamos esperando total, buscarlo en líneas siguientes
+        # 2) Si estamos esperando el total en líneas siguientes
         if looking_for_total and current_analysis:
             total_match = regex_total.search(line)
             if total_match:
@@ -109,39 +99,36 @@ def extract_analysis_units_two_step(pdf_path):
                 current_analysis = None
                 continue
 
-        # 3) Extraer recursos (solo si hay un análisis actual activo)
+        # 3) Extraer recursos solo si hay un análisis actual activo
         if current_analysis:
             match_resource = regex_resource_code.match(line)
             if match_resource:
-                resource_code = match_resource.group(1).strip()
+                raw_code = match_resource.group(1).strip() 
+                resource_code = raw_code.rstrip('-')
                 rest = match_resource.group(2).strip()
-                # Dividir el resto en tokens
                 tokens = rest.split()
-                # Buscar el primer token que sea una unidad válida
-                unit_index = None
-                for idx, token in enumerate(tokens):
-                    if token in allowed_units:
-                        unit_index = idx
-                        break
-                if unit_index is not None and len(tokens) >= unit_index + 5:
-                    resource_desc = " ".join(tokens[:unit_index])
-                    resource_unit = tokens[unit_index]
+                if len(tokens) < 5:
+                    print(f"No se pudo parsear 5 columnas en la línea de recurso:\n{line}")
+                else:
+                    # Asumir que los últimos 5 tokens son: unidad, cantidad, desper, vr_unitario, vr_parcial
+                    resource_unit = tokens[-5]
                     try:
-                        quantity = float(tokens[unit_index+1].replace('.', '').replace(',', '.'))
+                        quantity = float(tokens[-4].replace('.', '').replace(',', '.'))
                     except ValueError:
                         quantity = 0.0
                     try:
-                        desper = float(tokens[unit_index+2].replace('.', '').replace(',', '.'))
+                        desper = float(tokens[-3].replace('.', '').replace(',', '.'))
                     except ValueError:
                         desper = 0.0
                     try:
-                        vr_unit = float(tokens[unit_index+3].replace('.', '').replace(',', '.'))
+                        vr_unit = float(tokens[-2].replace('.', '').replace(',', '.'))
                     except ValueError:
                         vr_unit = 0.0
                     try:
-                        vr_parcial = float(tokens[unit_index+4].replace('.', '').replace(',', '.'))
+                        vr_parcial = float(tokens[-1].replace('.', '').replace(',', '.'))
                     except ValueError:
                         vr_parcial = 0.0
+                    resource_desc = " ".join(tokens[:-5])
                     resources_mapping.append({
                         'codigo_analisis': current_analysis['codigo'],
                         'codigo_recurso': resource_code,
@@ -152,8 +139,6 @@ def extract_analysis_units_two_step(pdf_path):
                         'vr_unit_recurso': vr_unit,
                         'vr_parcial_recurso': vr_parcial
                     })
-                else:
-                    print(f"No se pudo parsear 5 columnas en la línea de recurso:\n{line}")
 
     return analysis_units, resources_mapping
 
