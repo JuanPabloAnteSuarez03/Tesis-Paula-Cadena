@@ -75,15 +75,22 @@ def extract_analysis_units(pdf_path):
         if looking_for_total and current_analysis:
             match_total = regex_total.search(line)
             if match_total:
-                total_str = match_total.group(1).replace(',', '')
+                total_str = match_total.group(1).replace(',', '').replace('.', '')  # Limpiar comas y puntos
                 try:
                     total_val = float(total_str)
                 except ValueError:
                     total_val = 0.0
-                current_analysis['total'] = total_val
+
+                # Si ya teníamos un análisis previo, lo asignamos
+                if current_analysis is not None:
+                    current_analysis['total'] = total_val
+                else:
+                    # Crear un nuevo análisis si el total está separado
+                    current_analysis = {'total': total_val}
+
                 looking_for_total = False
-                current_analysis = None
                 continue
+
 
     return analysis_units
 
