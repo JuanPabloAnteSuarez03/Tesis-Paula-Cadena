@@ -1,55 +1,37 @@
-import PyPDF2
-import pandas as pd
-import re
 import os
-import tabula
+import pandas as pd
+from db_extraction_analisis_unitarios import extract_analysis_units, extract_resources
 
-# Ruta del archivo PDF
-pdf_path = os.path.join("data_gobernacion", "-ANALISIS UNITARIOS DECRET 1276 -2021.pdf")
+def main():
+    # Definir ruta del PDF y del directorio de salida
+    pdf_path = os.path.join("data_gobernacion", "-ANALISIS UNITARIOS DECRET 1276 -2021.pdf")
+    output_dir = "data_gobernacion"
+    
+    # Extraer análisis unitarios (para poder determinar en qué análisis estamos)
+    analysis_units = extract_analysis_units(pdf_path)
+    
+    # Extraer recursos asociados a los análisis unitarios
+    resources_mapping = extract_resources(pdf_path, analysis_units)
+    
+    # Convertir a DataFrame
+    df_resources = pd.DataFrame(resources_mapping)
+    
+    # Eliminar recursos duplicados basados en el código (asumimos que "codigo_recurso" identifica al recurso)
+    df_unique = df_resources.drop_duplicates(subset=['codigo_recurso'])
+    
+    # Seleccionar y renombrar columnas según lo solicitado:
+    # Queremos las columnas: Codigo, Descripcion, Unidad, Valor Unitario
+    df_unique = df_unique[['codigo_recurso', 'descripcion_recurso', 'unidad_recurso', 'vr_unitario']]
+    df_unique.columns = ['Codigo', 'Descripcion', 'Unidad', 'Valor Unitario']
+    
+    # Definir path de salida y guardar el CSV
+    output_csv = os.path.join(output_dir, "recursos_unicos.csv")
+    df_unique.to_csv(output_csv, index=False, encoding="utf-8")
+    print(f"Archivo CSV de recursos únicos generado exitosamente en: {output_csv}")
+    
+    # También se puede imprimir una muestra para verificar
+    print("\nMuestra de recursos únicos:")
+    print(df_unique.head())
 
-# PARA LA EXTRACCIÓN DE LOS RECURSOS
-
-# Extraer texto del PDF
-with open(pdf_path, "rb") as file:
-    pdf_reader = PyPDF2.PdfReader(file)
-    text = ""
-    for page in pdf_reader.pages:
-        text += page.extract_text() if page.extract_text() else ""
-
-# Expresión regular para extraer los artículos
-pattern = r"(\S+)-(.+?)\s([A-Z]+)\s([\d,\.]+)\s([\d,\.]+)\s([\d,\.]+)\s([\d,\.]+)"
-matches = re.findall(pattern, text)
-
-# Crear un DataFrame con los datos extraídos
-columns = ["Codigo", "Descripcion", "Unidad", "Cantidad", "Desperdicio", "Valor Unitario", "Valor Parcial"]
-df = pd.DataFrame(matches, columns=columns)
-
-# Limpiar y convertir las columnas numéricas
-df["Cantidad"] = df["Cantidad"].str.replace(".", "", regex=False).str.replace(",", ".", regex=False).astype(float)
-df["Desperdicio"] = df["Desperdicio"].str.replace(".", "", regex=False).str.replace(",", ".", regex=False).astype(float)
-df["Valor Unitario"] = df["Valor Unitario"].str.replace(".", "", regex=False).str.replace(",", "", regex=False).astype(float)
-df["Valor Parcial"] = df["Valor Parcial"].str.replace(".", "", regex=False).str.replace(",", "", regex=False).astype(float)
-
-# Mostrar las primeras filas para verificar la estructura
-print(df.head())
-
-# Exportar el DataFrame a un archivo CSV
-csv_path = os.path.join("data_gobernacion", "recursos_obras.csv")
-df.to_csv(csv_path, index=False, encoding="utf-8")
-
-print(f"Archivo CSV generado exitosamente en: {csv_path}")
-
-# Carga el archivo CSV
-df = pd.read_csv('data_gobernacion/recursos_obras.csv')
-
-# Elimina filas con códigos duplicados, conservando solo la primera aparición
-df_unicos = df.drop_duplicates(subset=['Codigo'])
-
-# Selecciona solo las columnas deseadas
-df_resultado = df_unicos[['Codigo', 'Descripcion', 'Unidad', 'Valor Unitario']]
-
-# Guarda el resultado en un nuevo archivo CSV (opcional)
-df_resultado.to_csv('data_gobernacion/recursos_unicos.csv', index=False)
-
-print(df_resultado)
-
+if __name__ == "__main__":
+    main()
