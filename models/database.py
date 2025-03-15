@@ -1,6 +1,7 @@
 import psycopg2
 import pandas as pd
-
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
 
 # Datos de conexión
 DB_NAME = "app_presupuestos"
@@ -23,75 +24,8 @@ def get_db_connection():
     except Exception as e:
         print("Error al conectar con la base de datos:", e)
         return None
-    
-# Crear las tablas necesarias
-def crear_tablas():
-    conn = get_db_connection()
-    if conn is None:
-        return
-    
-    try:
-        with conn.cursor() as cursor:
-            # Crear la tabla de presupuestos
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS presupuestos (
-                id SERIAL PRIMARY KEY,
-                nombre TEXT NOT NULL
-            );
-            """)
-            
-            # Crear la tabla de recursos
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS recursos (
-                id SERIAL PRIMARY KEY,
-                codigo TEXT NOT NULL UNIQUE,
-                descripcion TEXT NOT NULL,
-                unidad TEXT NOT NULL,
-                valor_unitario REAL NOT NULL
-            );
-            """)
-            
-            # Crear la tabla de relación entre presupuestos y recursos
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS presupuesto_recursos (
-                id SERIAL PRIMARY KEY,
-                presupuesto_id INTEGER REFERENCES presupuestos(id) ON DELETE CASCADE,
-                recurso_id INTEGER UNIQUE REFERENCES recursos(id) ON DELETE CASCADE,
-                cantidad REAL NOT NULL DEFAULT 1
-            );
-            """)
-            # Crear la tabla de analisis_unitarios
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS analisis_unitarios (
-                id SERIAL PRIMARY KEY,
-                codigo TEXT NOT NULL UNIQUE,
-                descripcion TEXT NOT NULL,
-                unidad TEXT NOT NULL,
-                total REAL NOT NULL
-            );
-            """)
-            # Crear la tabla de relacion entre analisis_unitarios y recursos
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS analisis_unitarios_recursos (
-                id SERIAL PRIMARY KEY,
-                descripcion_recurso TEXT NOT NULL,
-                codigo_recurso TEXT NOT NULL REFERENCES recursos(codigo) ON DELETE CASCADE,
-                codigo_analisis TEXT NOT NULL REFERENCES analisis_unitarios(codigo) ON DELETE CASCADE,
-                unidad_recurso TEXT NOT NULL,
-                cantidad_recurso FLOAT NOT NULL,
-                desper FLOAT NOT NULL,
-                vr_unitario FLOAT NOT NULL,
-                vr_parcial FLOAT NOT NULL
-            );
-            """)
-        conn.commit()
-        print("Tablas creadas correctamente.")
-        
-    except Exception as e:
-        print("Error al crear las tablas:", e)
-        
-    finally:
-        conn.close()
+
+
 
 # Cargar datos desde un archivo CSV
 def cargar_datos_recursos_desde_csv(csv_file):
@@ -215,9 +149,25 @@ def cargar_relacion_analisis_unitarios_recursos(csv_file):
         conn.close()
 
 
+# Conexión a la base de datos
+DATABASE_URL = "postgresql://postgres:123Randy@localhost:5432/app_presupuestos"
 
+try:
+    engine = create_engine(DATABASE_URL)
+    conn = engine.connect()
+    print("✅ Conexión exitosa a la base de datos.")
+    conn.close()
+except Exception as e:
+    print(f"❌ Error de conexión: {e}")
+
+
+# Crear una sesión para interactuar con la base de datos
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Base para definir modelos
+Base = declarative_base()
 # Ejecutar funciones
-crear_tablas()
 cargar_datos_recursos_desde_csv('../data_gobernacion/recursos_unicos.csv')
 cargar_analisis_unitarios('../data_gobernacion/analisis_unitarios.csv')
 cargar_relacion_analisis_unitarios_recursos('../data_gobernacion/recursos_analisis.csv')
+

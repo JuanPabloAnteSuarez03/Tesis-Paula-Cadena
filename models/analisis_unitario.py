@@ -1,31 +1,16 @@
-from models.recurso import Recurso
+from database import Base
+from sqlalchemy import Column, Integer, String, Float
+from sqlalchemy.orm import relationship
 
-class AnalisisUnitario:
-    def __init__(self, descripcion, unidad, cantidad, precio_unitario, recursos=None):
-        self.descripcion = descripcion
-        self.unidad = unidad
-        self.cantidad = cantidad
-        self.precio_unitario = precio_unitario
-        self.recursos = recursos if recursos is not None else []
-        self.total = self.calcular_total()
+class AnalisisUnitario(Base):
+    __tablename__ = "analisis_unitarios"
 
-    def calcular_total(self):
-        return self.cantidad * self.precio_unitario
+    id = Column(Integer, primary_key=True)
+    codigo = Column(String, unique=True, nullable=False)
+    descripcion = Column(String, nullable=False)
+    unidad = Column(String, nullable=False)
+    total = Column(Float, nullable=False)
 
-    def agregar_recurso(self, recurso: Recurso, cantidad):
-        self.recursos.append({'recurso': recurso, 'cantidad': cantidad})
-        self.actualizar_precio_unitario()
-        self.total = self.calcular_total()
-
-    def actualizar_precio_unitario(self):
-        self.precio_unitario = sum(
-            item['recurso'].valor_unitario * item['cantidad'] for item in self.recursos
-        )
-
-    @classmethod
-    def create_analisis_unitario(cls, descripcion, unidad, cantidad, recursos):
-        analisis = cls(descripcion, unidad, cantidad, 0, recursos)
-        analisis.actualizar_precio_unitario()
-        analisis.total = analisis.calcular_total()
-        # Aquí deberías agregar la lógica para guardar en la base de datos si es necesario
-        return analisis
+    # Relación con la tabla intermedia que conecta análisis y recursos
+    recursos_asociados = relationship("AnalisisUnitarioRecurso", back_populates="analisis")
+    presupuestos_asociados = relationship("PresupuestoAnalisisUnitario", back_populates="analisis")
