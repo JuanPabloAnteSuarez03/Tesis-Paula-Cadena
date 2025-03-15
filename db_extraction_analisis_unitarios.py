@@ -118,6 +118,8 @@ def parse_resource_line(line):
     #    Usamos un regex con grupos alternativos, y exigimos que termine en '-'
     #    para separar luego la descripción.
     
+    import re
+    
     # Patrón para "código-" (quitamos el guion al final):
     code_pattern = re.compile(
         r'^(?:'                # comienzo del string
@@ -160,18 +162,24 @@ def parse_resource_line(line):
     if len(new_tokens) < 5:
         return None  # no hay columnas suficientes
     
-    # Queremos ubicar la unidad. Asumimos que la unidad es uno de:
-    # "UND|M2|ML|GLN|VJE|LBS|M3|KLS|M/D|HRS|DIA|CM3|JGO|CJO|HC|CC|GLB|PHC|..."
-    # (puedes ampliarla con las que necesites).
-    
+    # Lista de unidades posibles
     unit_list = [
         'HC','GLB','VJE','M3','M2','UND','HRS','KG','KLS','LBS','ML','DIA','CM3','CJO','JGO','SC','M3K','GLL','ROL','VJE','CC','HR','PHC','G','K','DIA','KG','KG.','GL','LTS','U/D','CUN','GLN','HH','LAM','PLI','BTO','GLS','CAN','RLL','PAR','ARR','VAR','PG2','CAR','ATD','KLL','T/K','MES','CAJ'
     ]
     
-    # Vamos a buscar la unidad en new_tokens
+    # CAMBIO: Buscar la unidad desde el final hacia el principio
+    # Asumimos que los 4 últimos tokens son CANT, DESPER, VRUNIT, VRPARCIAL
+    # La unidad debería estar justo antes de estos 4 valores numéricos
+    
+    # Verificamos que haya al menos 5 tokens (unidad + 4 valores numéricos)
+    if len(new_tokens) < 5:
+        return None
+    
+    # Buscar hacia atrás hasta encontrar una unidad reconocida
+    # Empezamos desde el quinto elemento desde el final hacia adelante
     unit_index = -1
-    for i, tok in enumerate(new_tokens):
-        if tok.upper() in unit_list:
+    for i in range(len(new_tokens) - 4, -1, -1):
+        if new_tokens[i].upper() in unit_list:
             unit_index = i
             break
     
@@ -184,18 +192,18 @@ def parse_resource_line(line):
     desc_part = new_tokens[:unit_index]  # puede tener varias palabras
     description_recurso = " ".join(desc_part).strip()
     
-    # Lo que sigue a la unidad son 5 posibles tokens: CANT, DESPER, VRUNIT, VRPARCIAL
-    # En la práctica, a veces DESPER no existe o es "0,00", ajusta según tu caso.
-    # Asumiremos 4 tokens: Cant, Desper, VrUnit, VrParcial
-    # (Si a veces no hay "desper", lo interpretas como 0.0)
-    
+    # Lo que sigue a la unidad son los datos numéricos
+    # Esperamos 4 tokens: Cant, Desper, VrUnit, VrParcial
+    # Para asegurar que tomamos los 4 valores correctos, tomamos desde el final
     rest = new_tokens[unit_index+1:]
+    
+    # Necesitamos exactamente 4 valores numéricos al final
     if len(rest) < 4:
-        print(f"No se pudo parsear 5 columnas en la línea de recurso:\n{line}")
+        print(f"No hay suficientes valores numéricos después de la unidad en la línea:\n{line}")
         return None
     
-    # Tomamos 4 exactos: cant, desper, vrunit, vrparcial
-    cant_str, desper_str, vrunit_str, vrparcial_str = rest[:4]
+    # Tomamos los últimos 4 valores como cant, desper, vrunit, vrparcial
+    cant_str, desper_str, vrunit_str, vrparcial_str = rest[-4:]
     
     # Convertir a float
     def to_float(s):
