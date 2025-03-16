@@ -20,4 +20,3 @@ class AnalisisUnitarioRecurso(Base):
     analisis = relationship("AnalisisUnitario", back_populates="recursos_asociados")
     recurso = relationship("Recurso", back_populates="analisis")
 
-    __table_args__ = (UniqueConstraint("codigo_analisis", "codigo_recurso"),)
