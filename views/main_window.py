@@ -1,107 +1,82 @@
+# views/main_window.py
 import sys
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QMenuBar, QToolBar,
-    QDockWidget, QListWidget, QWidget, QVBoxLayout,
-    QTableView, QHBoxLayout, QLabel
+    QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, 
+    QPushButton, QStackedWidget, QSplitter
 )
-from PyQt6.QtGui import (QIcon, QAction)
-from PyQt6.QtCore import Qt
+from .presupuesto_view import PresupuestoView
+from .resource_list_view import ResourceListView
+from .analisis_unitarios_view import AnalisisUnitariosView
+from .analisis_por_presupuesto_view import AnalisisPorPresupuestoView
+from controllers.resource_controller import ResourceController
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.setWindowTitle("App Presupuestos - MVC")
+        self.resize(1200, 800)
+        self.init_ui()
 
-        self.setWindowTitle("Mi Aplicación de Presupuestos")
-        self.resize(1000, 600)
+    def init_ui(self):
+        main_widget = QWidget()
+        main_layout = QHBoxLayout(main_widget)
+        self.setCentralWidget(main_widget)
 
-        # ----- Menú Superior -----
-        menu_bar = self.menuBar()  # QMenuBar por defecto en QMainWindow
-        archivo_menu = menu_bar.addMenu("Archivo")
-        inicio_menu = menu_bar.addMenu("Inicio")
-        insertar_menu = menu_bar.addMenu("Insertar")
-        datos_contables_menu = menu_bar.addMenu("Datos Contables")
-        valor_ganado_menu = menu_bar.addMenu("Valor Ganado")
+        splitter = QSplitter()
+        main_layout.addWidget(splitter)
 
-        # (Opcional) Agregar acciones a los menús
-        accion_salir = QAction("Salir", self)
-        archivo_menu.addAction(accion_salir)
+        # Panel de navegación
+        nav_widget = QWidget()
+        nav_layout = QVBoxLayout(nav_widget)
+        btn_presupuestos = QPushButton("Presupuestos")
+        btn_recursos = QPushButton("Recursos")
+        btn_analisis = QPushButton("Análisis Unitarios")
+        nav_layout.addWidget(btn_presupuestos)
+        nav_layout.addWidget(btn_recursos)
+        nav_layout.addWidget(btn_analisis)
+        nav_layout.addStretch()
+        splitter.addWidget(nav_widget)
 
-        # ----- Barra de herramientas (ToolBar) -----
-        toolbar = QToolBar("Barra de herramientas")
-        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
+        # StackedWidget para las vistas
+        self.stacked_widget = QStackedWidget()
+        splitter.addWidget(self.stacked_widget)
+        splitter.setStretchFactor(1, 1)
 
-        # Botones (acciones) de ejemplo
-        presupuesto_action = QAction("Presupuesto", self)
-        nueva_act_action = QAction("Agregar nueva actividad", self)
-        eliminar_act_action = QAction("Eliminar Actividad", self)
-        editar_act_action = QAction("Editar descripción Actividad", self)
-        generar_action = QAction("Generar Presupuesto", self)
+        # Creamos vistas iniciales
+        self.presupuesto_view = PresupuestoView()
+        self.analisis_view = AnalisisUnitariosView()
 
-        # Añadir acciones a la toolbar
-        toolbar.addAction(presupuesto_action)
-        toolbar.addAction(nueva_act_action)
-        toolbar.addAction(eliminar_act_action)
-        toolbar.addAction(editar_act_action)
-        toolbar.addSeparator()
-        toolbar.addAction(generar_action)
+        # Insertamos esas vistas
+        self.stacked_widget.addWidget(self.presupuesto_view)  # índice 0
+        self.stacked_widget.addWidget(self.analisis_view)      # índice 1
 
-        # ----- Panel lateral izquierdo (Dock: “Recursos”) -----
-        self.dock_recursos = QDockWidget("Recursos", self)
-        self.dock_recursos.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea)
-        # Por ejemplo, una lista para mostrar “Recursos”
-        list_widget = QListWidget()
-        list_widget.addItem("Recurso 1")
-        list_widget.addItem("Recurso 2")
-        list_widget.addItem("Recurso 3")
-        self.dock_recursos.setWidget(list_widget)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_recursos)
+        # Conectar los botones
+        btn_presupuestos.clicked.connect(lambda: self.stacked_widget.setCurrentWidget(self.presupuesto_view))
+        btn_analisis.clicked.connect(lambda: self.stacked_widget.setCurrentWidget(self.analisis_view))
+        btn_recursos.clicked.connect(self.show_resources)
 
-        # ----- Panel lateral derecho (opcional: “Valor Unitario”) -----
-        self.dock_valor = QDockWidget("Valor Unitario", self)
-        self.dock_valor.setAllowedAreas(Qt.DockWidgetArea.RightDockWidgetArea)
-        # Aquí podrías poner un widget con información extra
-        valor_label = QLabel("Detalles del Recurso / Valor Unitario", self)
-        self.dock_valor.setWidget(valor_label)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_valor)
+    def show_resources(self):
+        """
+        Carga o actualiza la vista de recursos usando ResourceController
+        y la muestra en el stacked_widget.
+        """
+        # Crear (o reusar) el controlador
+        self.resource_controller = ResourceController()
+        # Obtenemos el widget de la vista
+        resource_view_widget = self.resource_controller.view
 
-        # ----- Zona Central: tabla con las columnas (Código, Item, etc.) -----
-        central_widget = QWidget()
-        central_layout = QVBoxLayout()
-        central_widget.setLayout(central_layout)
+        # Ver si ya está en el stacked o no
+        index = self.stacked_widget.indexOf(resource_view_widget)
+        if index == -1:
+            # No está en el stacked, lo insertamos
+            self.stacked_widget.addWidget(resource_view_widget)
+            index = self.stacked_widget.indexOf(resource_view_widget)
 
-        self.table_view = QTableView()
-        # Aquí se configuraría un modelo (MVC) para la tabla.
-        central_layout.addWidget(self.table_view)
+        # Cambiar a esa vista
+        self.stacked_widget.setCurrentIndex(index)
 
-        self.setCentralWidget(central_widget)
-
-        # ----- Aplicar un estilo (CSS/QSS) -----
-        self.setStyleSheet("""
-            QMainWindow {
-                background: #F5F5F5; /* color de fondo general */
-            }
-            QToolBar {
-                background: #E0E0E0;
-            }
-            QDockWidget {
-                background: #FFFFFF;
-                border: 1px solid #CCCCCC;
-            }
-            QListWidget {
-                background: #FAFAFA;
-            }
-            QTableView {
-                gridline-color: #CCCCCC;
-                selection-background-color: #A0C5E8;
-                font-size: 14px;
-            }
-        """)
-
-def main():
+if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
-
-if __name__ == "__main__":
-    main()
