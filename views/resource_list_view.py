@@ -1,5 +1,7 @@
 # views/resource_list_view.py
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTableView, QHeaderView
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QTableView, QHeaderView, QPushButton, QHBoxLayout, QLineEdit, QMessageBox
+)
 from PyQt6.QtGui import QStandardItemModel, QStandardItem
 
 class ResourceListView(QWidget):
@@ -8,7 +10,7 @@ class ResourceListView(QWidget):
         self.init_ui()
     
     def init_ui(self):
-        # Crear el layout vertical
+        # Crear el layout principal vertical
         layout = QVBoxLayout(self)
         
         # Crear el QTableView y el modelo asociado
@@ -16,12 +18,19 @@ class ResourceListView(QWidget):
         self.model = QStandardItemModel(self)
         self.model.setHorizontalHeaderLabels(["Código", "Descripción", "Unidad", "Valor Unitario"])
         self.table_view.setModel(self.model)
-        
-        # Ajustar el tamaño de las columnas para que se adapten al contenido
         self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         
-        # Agregar el table view al layout
+        # Agregar el table view al layout principal
         layout.addWidget(self.table_view)
+        
+        # Crear un layout horizontal para el botón "Agregar recurso"
+        button_layout = QHBoxLayout()
+        self.add_button = QPushButton("Agregar recurso")
+        self.add_button.clicked.connect(self.add_resource_row)
+        button_layout.addStretch()  # Empuja el botón a la derecha (opcional)
+        button_layout.addWidget(self.add_button)
+        
+        layout.addLayout(button_layout)
         self.setLayout(layout)
     
         self.setStyleSheet("""
@@ -35,6 +44,15 @@ class ResourceListView(QWidget):
                 color: white;
                 padding: 4px;
                 border: 1px solid #6c6c6c;
+            }
+            QPushButton {
+                background-color: #007ACC;
+                color: white;
+                padding: 6px 12px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #005999;
             }
         """)
     
@@ -53,26 +71,16 @@ class ResourceListView(QWidget):
                 QStandardItem(str(resource.get("valor_unitario", 0)))
             ]
             self.model.appendRow(row)
-        
-
-
-
-# Ejemplo de uso en una aplicación principal (parte del MVC)
-if __name__ == "__main__":
-    import sys
-    from PyQt6.QtWidgets import QApplication
     
-    # Ejemplo de datos (estos datos vendrían de tu modelo o CSV)
-    recursos = [
-        {"codigo": "MOAG01", "descripcion": "MANO OBRA ALBANILERIA1 AYUDANTE", "unidad": "HC", "valor_unitario": 8949.0},
-        {"codigo": "MQ0207", "descripcion": "VOLQUETA 5 M3", "unidad": "VJE", "valor_unitario": 46500.0},
-        {"codigo": "MQ0301", "descripcion": "HERRAMIENTA MENOR", "unidad": "GLB", "valor_unitario": 1600.0}
-    ]
-    
-    app = QApplication(sys.argv)
-    view = ResourceListView()
-    view.load_data(recursos)
-    view.setWindowTitle("Lista de Recursos")
-    view.resize(800, 400)
-    view.show()
-    sys.exit(app.exec())
+    def add_resource_row(self):
+        """
+        Agrega una nueva fila en blanco al modelo para que el usuario pueda ingresar un nuevo recurso.
+        """
+        blank_row = [
+            QStandardItem(""),  # Código
+            QStandardItem(""),  # Descripción
+            QStandardItem(""),  # Unidad
+            QStandardItem("")   # Valor Unitario
+        ]
+        self.model.appendRow(blank_row)
+        QMessageBox.information(self, "Agregar recurso", "Se agregó una nueva fila. Completa los datos del recurso.")
