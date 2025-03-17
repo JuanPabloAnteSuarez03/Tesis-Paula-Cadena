@@ -1,7 +1,7 @@
 # controllers/recursos_por_analisis_controller.py
 import traceback
 from PyQt6.QtCore import QObject
-from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtWidgets import QMessageBox, QDialog, QVBoxLayout, QPushButton
 from PyQt6.QtGui import QStandardItem
 from models.analisis_unitario_recurso import AnalisisUnitarioRecurso
 from models.analisis_unitario import AnalisisUnitario
@@ -15,18 +15,23 @@ class RecursosPorAnalisisController(QObject):
         self.codigo_analisis = codigo_analisis
         print(f"[DEBUG] Iniciando RecursosPorAnalisisController para análisis: {codigo_analisis}")
         self.view = RecursosPorAnalisisView(codigo_analisis)
+        # Diccionario para acumular cambios pendientes (clave: código del recurso)
+        self.changes_pending = {}
 
         # Conectar botones definidos en la vista
         self.view.add_button.clicked.connect(self.open_resource_selector)
         self.view.update_button.clicked.connect(self.update_analysis)
         # Conectar el botón del formulario manual para agregar fila
         self.view.add_form_button.clicked.connect(self.on_add_form_button_clicked)
-        # Conectar la señal del modelo para detectar ediciones (dataChanged)
+        # Conectar la señal dataChanged del modelo para detectar ediciones
         self.view.model.dataChanged.connect(self.on_item_changed)
         print("✅ Señal dataChanged conectada correctamente.")
 
+
         # Cargar datos iniciales para el análisis
         self.load_recurso_por_analisis()
+
+
 
     def load_recurso_por_analisis(self):
         """Carga desde la BD los recursos asociados al análisis y actualiza la vista."""
@@ -89,7 +94,7 @@ class RecursosPorAnalisisController(QObject):
         finally:
             session.close()
 
-        # Agregar el recurso a la tabla con valores predeterminados para cantidad y demás
+        # Agregar el recurso a la tabla con valores predeterminados
         row_position = self.view.model.rowCount()
         self.view.model.insertRow(row_position)
         self.view.model.setItem(row_position, 0, QStandardItem(resource.get("codigo_recurso", "")))
@@ -102,13 +107,9 @@ class RecursosPorAnalisisController(QObject):
         dialog.accept()
 
     def on_add_form_button_clicked(self):
-        """
-        Se ejecuta al presionar el botón 'Agregar a Tabla' del formulario.
-        (La vista ya inserta la fila en el modelo, aquí podemos agregar lógica extra si se requiere.)
-        """
+        """Se ejecuta al presionar el botón 'Agregar a Tabla' del formulario."""
         print("[DEBUG] Botón 'Agregar a Tabla' presionado (desde el formulario).")
-        # Si es necesario, aquí se pueden obtener datos del formulario y realizar validaciones o guardarlos en BD
-        # En este ejemplo, asumimos que la vista ya actualizó el modelo.
+        # Aquí podrías agregar lógica adicional si es necesario.
 
     def update_analysis(self):
         """
@@ -179,38 +180,32 @@ class RecursosPorAnalisisController(QObject):
     def on_item_changed(self, topLeft, bottomRight, roles):
         """
         Se dispara cuando se edita una celda del modelo.
-        Actualiza en la BD el registro correspondiente a esa fila.
-        Asumimos que se edita una celda a la vez.
+        Actualiza en memoria (en el modelo) el vr_parcial de la fila editada.
+        No se realiza commit a la BD aquí para evitar múltiples commits.
         """
         row = topLeft.row()
-        session = SessionLocal()
+        # Bloqueamos las señales para evitar que la actualización de la celda dispare de nuevo este evento
+        self.view.model.blockSignals(True)
         try:
-            codigo_item = self.view.model.item(row, 0)
-            if not codigo_item:
-                return
-            codigo = codigo_item.text().strip()
-            recurso = session.query(AnalisisUnitarioRecurso).filter_by(
-                codigo_analisis=self.codigo_analisis,
-                codigo_recurso=codigo
-            ).first()
-            if not recurso:
-                print(f"[DEBUG] Recurso {codigo} no encontrado en la BD (on_item_changed).")
-                return
+            try:
+                cantidad = float(self.view.model.item(row, 3).text())
+            except:
+                cantidad = 0.0
+            try:
+                desperdicio = float(self.view.model.item(row, 4).text())
+            except:
+                desperdicio = 0.0
+            try:
+                vr_unitario = float(self.view.model.item(row, 5).text())
+            except:
+                vr_unitario = 0.0
 
-            col = topLeft.column()
-            new_value = self.view.model.item(row, col).text().strip()
-            if col == 3:  # Cantidad
-                recurso.cantidad_recurso = float(new_value) if new_value else 0.0
-            elif col == 4:  # Desperdicio
-                recurso.desper = float(new_value) if new_value else 0.0
-            elif col == 5:  # Valor Unitario
-                recurso.vr_unitario = float(new_value) if new_value else 0.0
-            # No se modifica vr_parcial; se calcula automáticamente con el híbrido
-
-            session.commit()
-            print(f"[DEBUG] on_item_changed: Recurso {codigo} actualizado. Nuevo vr_parcial: {recurso.vr_parcial}")
-        except Exception as e:
-            session.rollback()
-            print(f"[ERROR] on_item_changed para {codigo}: {e}")
+            # Calcular vr_parcial localmente
+            vr_parcial = cantidad * (1 + desperdicio) * vr_unitario  # Asegúrate que la fórmula sea la correcta
+            # Actualizamos la celda de vr_parcial
+            self.view.model.setItem(row, 6, QStandardItem(f"{vr_parcial:.2f}"))
+            print(f"[DEBUG] on_item_changed: Fila {row} - vr_parcial recalculado: {vr_parcial:.2f}")
         finally:
-            session.close()
+            # Desbloqueamos las señales después de la actualización
+            self.view.model.blockSignals(False)
+

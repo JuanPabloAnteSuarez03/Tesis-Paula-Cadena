@@ -13,6 +13,7 @@ class RecursosPorAnalisisView(QWidget):
     def __init__(self, codigo_analisis, parent=None):
         super().__init__(parent)
         self.codigo_analisis = codigo_analisis
+        self.setWindowTitle(f"Recursos para Análisis {codigo_analisis}")
         self.resize(800, 600)
         self.layout = QVBoxLayout(self)
         

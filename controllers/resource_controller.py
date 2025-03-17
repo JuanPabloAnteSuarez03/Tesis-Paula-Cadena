@@ -11,6 +11,7 @@ class ResourceController(QObject):
         self.load_resources()
         # Conectar la señal dataChanged del modelo a la función de actualización
         self.view.model.dataChanged.connect(self.on_data_changed)
+        
         # También puedes conectar el botón de agregar recurso, etc.
 
     def load_resources(self):
