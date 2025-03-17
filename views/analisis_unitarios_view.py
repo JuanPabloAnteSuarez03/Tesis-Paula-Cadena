@@ -1,21 +1,24 @@
-# analisis_unitarios_view.py
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
+    QHeaderView, QPushButton, QLineEdit, QLabel, QMessageBox
+)
 from PyQt6.QtCore import Qt, pyqtSignal
+from .recursos_por_analisis_view import RecursosPorAnalisisView
 
 class AnalisisUnitariosView(QWidget):
-    # Señal que se emite con el código del análisis seleccionado
+    # Señal que se emite cuando se hace doble clic en una celda (por ejemplo, para seleccionar un análisis)
     analysis_selected = pyqtSignal(str)
+    # Señal que se emite cuando se solicita agregar un nuevo análisis unitario
+    add_analysis = pyqtSignal(dict)
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Análisis Unitarios")
         self.resize(800, 600)
         self.layout = QVBoxLayout(self)
-        self.table = QTableWidget(self)
-        self.layout.addWidget(self.table)
-        self.setup_table()
-        
-        # Ejemplo de aplicar CSS (QSS) a la tabla
+        self.create_form()
+        self.create_table()
+        self.setLayout(self.layout)
         self.setStyleSheet("""
             QTableWidget {
                 background-color: #f9f9f9;
@@ -28,37 +31,109 @@ class AnalisisUnitariosView(QWidget):
                 padding: 4px;
                 font-weight: bold;
             }
+            QPushButton {
+                background-color: #007ACC;
+                color: white;
+                border-radius: 4px;
+                padding: 8px;
+            }
+            QPushButton:hover {
+                background-color: #005A9E;
+            }
         """)
+
+    def create_form(self):
+        # Formulario para agregar un nuevo análisis unitario
+        self.form_layout = QHBoxLayout()
+        self.codigo_input = QLineEdit()
+        self.codigo_input.setPlaceholderText("Código")
+        self.descripcion_input = QLineEdit()
+        self.descripcion_input.setPlaceholderText("Descripción")
+        self.unidad_input = QLineEdit()
+        self.unidad_input.setPlaceholderText("Unidad")
+        self.total_input = QLineEdit()
+        self.total_input.setPlaceholderText("Total")
+        self.add_button = QPushButton("Agregar Análisis")
+        # Conectar el botón al método local que recoge los datos y emite la señal
+        self.add_button.clicked.connect(self.on_add_clicked)
+        
+        self.form_layout.addWidget(QLabel("Código:"))
+        self.form_layout.addWidget(self.codigo_input)
+        self.form_layout.addWidget(QLabel("Descripción:"))
+        self.form_layout.addWidget(self.descripcion_input)
+        self.form_layout.addWidget(QLabel("Unidad:"))
+        self.form_layout.addWidget(self.unidad_input)
+        self.form_layout.addWidget(QLabel("Total:"))
+        self.form_layout.addWidget(self.total_input)
+        self.form_layout.addWidget(self.add_button)
+        self.layout.addLayout(self.form_layout)
     
-    def setup_table(self):
-        # Definimos las columnas
+    def create_table(self):
+        # Crear la tabla para mostrar los análisis unitarios
+        self.table = QTableWidget()
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["Código", "Descripción", "Unidad", "Total"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.layout.addWidget(self.table)
         
-        # Datos de ejemplo (en tu caso serán obtenidos de la base o del CSV)
-        sample_data = [
-            {"codigo": "01-01-01", "descripcion": "CORTE ARBOL MAS RETIRO (INCL.RAICES)H>3.0", "unidad": "UND", "total": 106594.0},
-            {"codigo": "01-01-02", "descripcion": "CORTE Y RETIRO DE ARBUSTO", "unidad": "UND", "total": 9735.0},
-            {"codigo": "01-01-03", "descripcion": "DEMOL.CAMARA DE CONCRETO", "unidad": "UND", "total": 177396.0},
-            {"codigo": "01-01-04", "descripcion": "DEMOL.LOSA CONCRETO E<=20CMS", "unidad": "M2", "total": 29615.0},
-            {"codigo": "01-01-05", "descripcion": "DEMOL.LOSA CONCRETO E<=15CMS", "unidad": "M2", "total": 25220.0},
-        ]
-        
-        self.table.setRowCount(len(sample_data))
-        for row, item in enumerate(sample_data):
-            self.table.setItem(row, 0, QTableWidgetItem(item["codigo"]))
-            self.table.setItem(row, 1, QTableWidgetItem(item["descripcion"]))
-            self.table.setItem(row, 2, QTableWidgetItem(item["unidad"]))
-            self.table.setItem(row, 3, QTableWidgetItem(f"{item['total']:.2f}"))
-        
-        # Conectar el doble clic para emitir la señal
+        # Conectar el doble clic para emitir la señal de selección
         self.table.cellDoubleClicked.connect(self.on_cell_double_clicked)
     
+    def load_data(self, data):
+        """
+        Recibe una lista de diccionarios con las claves:
+          'codigo', 'descripcion', 'unidad' y 'total'
+        y llena la tabla.
+        """
+        self.table.blockSignals(True)  # Evitar que se dispare el itemChanged durante la carga
+        self.table.setRowCount(len(data))
+        for row, item in enumerate(data):
+            self.table.setItem(row, 0, QTableWidgetItem(item.get("codigo", "")))
+            self.table.setItem(row, 1, QTableWidgetItem(item.get("descripcion", "")))
+            self.table.setItem(row, 2, QTableWidgetItem(item.get("unidad", "")))
+            self.table.setItem(row, 3, QTableWidgetItem(f"{item.get('total', 0):.2f}"))
+        self.table.blockSignals(False)
+    
+    def get_data_from_form(self):
+        """
+        Lee los datos de los campos del formulario y los retorna en un diccionario.
+        """
+        codigo = self.codigo_input.text().strip()
+        descripcion = self.descripcion_input.text().strip()
+        unidad = self.unidad_input.text().strip()
+        try:
+            total = float(self.total_input.text().strip())
+        except ValueError:
+            total = 0.0
+        return {"codigo": codigo, "descripcion": descripcion, "unidad": unidad, "total": total}
+    
+    def clear_form(self):
+        """
+        Limpia los campos del formulario.
+        """
+        self.codigo_input.clear()
+        self.descripcion_input.clear()
+        self.unidad_input.clear()
+        self.total_input.clear()
+    
+    def on_add_clicked(self):
+        """
+        Método que se dispara al presionar el botón "Agregar Análisis".
+        Emite la señal add_analysis con los datos del formulario.
+        """
+        data = self.get_data_from_form()
+        if not data["codigo"] or not data["descripcion"]:
+            QMessageBox.warning(self, "Datos incompletos", "Código y Descripción son obligatorios.")
+            return
+        self.add_analysis.emit(data)
+        self.clear_form()
+    
     def on_cell_double_clicked(self, row, column):
+        # Emite la señal con el código del análisis cuando se hace doble clic
         codigo_item = self.table.item(row, 0)
         if codigo_item:
+
             codigo = codigo_item.text()
+            QMessageBox.information(self, "Análisis Seleccionado", f"Se seleccionó: {codigo}")
             self.analysis_selected.emit(codigo)
-            # Opcional: muestra un mensaje (o bien abre la vista de recursos)
-            # QMessageBox.information(self, "Análisis seleccionado", f"Se seleccionó: {codigo}")
+
