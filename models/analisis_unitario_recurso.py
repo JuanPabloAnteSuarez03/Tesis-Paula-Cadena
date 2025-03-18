@@ -22,16 +22,4 @@ class AnalisisUnitarioRecurso(Base):
     analisis = relationship("AnalisisUnitario", back_populates="recursos_asociados")
     recurso = relationship("Recurso", back_populates="analisis")
 
-    @hybrid_property
-    def calcular_vr_parcial(self):
-        """Calcula el valor parcial dinámicamente."""
-        return self.cantidad_recurso * (1 + self.desper) * self.vr_unitario
-
-    @calcular_vr_parcial.expression
-    def calcular_vr_parcial(cls):
-        """Expresión SQL para calcular `vr_parcial` en consultas."""
-        return cls.cantidad_recurso * (1 + cls.desper) * cls.vr_unitario
-
-    def actualizar_vr_parcial(self):
-        """Método para actualizar el valor parcial manualmente antes de guardar."""
-        self.vr_parcial = self.calcular_vr_parcial
+    __table_args__ = (UniqueConstraint("codigo_analisis", "codigo_recurso"),)
