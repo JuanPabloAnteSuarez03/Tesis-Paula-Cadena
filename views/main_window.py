@@ -9,6 +9,8 @@ from .resource_list_view import ResourceListView
 from .analisis_unitarios_view import AnalisisUnitariosView
 from .analisis_por_presupuesto_view import AnalisisPorPresupuestoView
 from controllers.resource_controller import ResourceController
+from controllers.analisis_unitarios_controller import AnalisisUnitariosController
+from controllers.recursos_por_analisis_controller import RecursosPorAnalisisController
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -52,7 +54,7 @@ class MainWindow(QMainWindow):
 
         # Conectar los botones
         btn_presupuestos.clicked.connect(lambda: self.stacked_widget.setCurrentWidget(self.presupuesto_view))
-        btn_analisis.clicked.connect(lambda: self.stacked_widget.setCurrentWidget(self.analisis_view))
+        btn_analisis.clicked.connect(self.show_analisis_unitarios)
         btn_recursos.clicked.connect(self.show_resources)
 
     def show_resources(self):
@@ -74,6 +76,31 @@ class MainWindow(QMainWindow):
 
         # Cambiar a esa vista
         self.stacked_widget.setCurrentIndex(index)
+
+    def show_analisis_unitarios(self):
+        # Crear (o reusar) el controlador de análisis unitarios
+        self.analisis_controller = AnalisisUnitariosController()
+        analisis_view_widget = self.analisis_controller.view
+
+        # Conectar la señal 'analysis_selected' para que llame a show_recursos_por_analisis
+        analisis_view_widget.analysis_selected.connect(self.show_recursos_por_analisis)
+
+        # Agregar la vista al StackedWidget si no está ya
+        index = self.stacked_widget.indexOf(analisis_view_widget)
+        if index == -1:
+            self.stacked_widget.addWidget(analisis_view_widget)
+            index = self.stacked_widget.indexOf(analisis_view_widget)
+        self.stacked_widget.setCurrentIndex(index)
+
+
+    def show_recursos_por_analisis(self, codigo_analisis):
+        print("HOLAAAAAAAAAAAA")
+        # Instanciar el controlador y obtener su vista
+        self.recursos_por_analisis_controller = RecursosPorAnalisisController(codigo_analisis)
+        view_widget = self.recursos_por_analisis_controller.view
+        # En lugar de agregarlo al stacked, simplemente lo mostramos como ventana independiente:
+        view_widget.show()
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
