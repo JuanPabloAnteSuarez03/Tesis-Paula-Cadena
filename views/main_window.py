@@ -11,6 +11,8 @@ from .analisis_por_presupuesto_view import AnalisisPorPresupuestoView
 from controllers.resource_controller import ResourceController
 from controllers.analisis_unitarios_controller import AnalisisUnitariosController
 from controllers.recursos_por_analisis_controller import RecursosPorAnalisisController
+from controllers.presupuesto_controller import PresupuestoController
+from controllers.presupuesto_analisis_unitario_controller import PresupuestoAnalisisUnitarioController  
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -53,7 +55,8 @@ class MainWindow(QMainWindow):
         self.stacked_widget.addWidget(self.analisis_view)      # índice 1
 
         # Conectar los botones
-        btn_presupuestos.clicked.connect(lambda: self.stacked_widget.setCurrentWidget(self.presupuesto_view))
+        btn_presupuestos.clicked.connect(self.show_presupuestos)
+        btn_presupuestos.click()  # Simulate a button click to execute the function initially
         btn_analisis.clicked.connect(self.show_analisis_unitarios)
         btn_recursos.clicked.connect(self.show_resources)
 
@@ -98,6 +101,28 @@ class MainWindow(QMainWindow):
         # Instanciar el controlador y obtener su vista
         self.recursos_por_analisis_controller = RecursosPorAnalisisController(codigo_analisis)
         view_widget = self.recursos_por_analisis_controller.view
+        # En lugar de agregarlo al stacked, simplemente lo mostramos como ventana independiente:
+        view_widget.show()
+
+    def show_presupuestos(self):
+        # Crear (o reusar) el controlador de presupuestos
+        self.presupuesto_controller = PresupuestoController()
+        presupuesto_view_widget = self.presupuesto_controller.view
+
+        # Conectar la señal 'presupuesto_selected' para que llame a show_analisis_por_presupuesto
+        presupuesto_view_widget.presupuesto_selected.connect(self.show_analisis_por_presupuesto)
+
+        # Agregar la vista al StackedWidget si no está ya
+        index = self.stacked_widget.indexOf(presupuesto_view_widget)
+        if index == -1:
+            self.stacked_widget.addWidget(presupuesto_view_widget)
+            index = self.stacked_widget.indexOf(presupuesto_view_widget)
+        self.stacked_widget.setCurrentIndex(index)
+
+    def show_analisis_por_presupuesto(self, codigo_presupuesto):
+        # Instanciar el controlador y obtener su vista
+        self.presupuesto_analisis_controller = PresupuestoAnalisisUnitarioController(codigo_presupuesto)
+        view_widget = self.presupuesto_analisis_controller.view
         # En lugar de agregarlo al stacked, simplemente lo mostramos como ventana independiente:
         view_widget.show()
 
