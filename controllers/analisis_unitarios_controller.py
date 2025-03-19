@@ -9,6 +9,7 @@ class AnalisisUnitariosController(QObject):
         super().__init__(parent)
         self.view = AnalisisUnitariosView()
         self.load_analisis_unitarios()
+        print("AnalisisUnitariosController")
         # Conectar la señal de edición para actualizar la BD si se edita alguna celda
         self.view.table.itemChanged.connect(self.on_data_changed)
         # Conectar la señal del botón de agregar análisis
