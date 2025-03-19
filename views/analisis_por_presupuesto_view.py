@@ -1,80 +1,142 @@
+# views/recursos_por_analisis_view.py
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QHeaderView, QPushButton, QMessageBox
+    QWidget, QVBoxLayout, QHBoxLayout, QTableView, QHeaderView, QPushButton, 
+    QMessageBox, QLabel, QLineEdit, QDialog
 )
+from PyQt6.QtGui import QStandardItemModel, QStandardItem
 from PyQt6.QtCore import Qt, pyqtSignal
 
 class AnalisisPorPresupuestoView(QWidget):
-    prespuesto_selected = pyqtSignal(str)
+    # Señal para notificar cuando se selecciona un análisis (por ejemplo, desde el selector)
+    analisis_selected_por_presupuesto = pyqtSignal(str)
+    
     def __init__(self, codigo_presupuesto, parent=None):
         super().__init__(parent)
         self.codigo_presupuesto = codigo_presupuesto
-        self.setWindowTitle(f"Análisis Unitarios para Presupuesto {codigo_presupuesto}")
+        self.setWindowTitle(f"Análisis para Presupuesto {codigo_presupuesto}")
         self.resize(800, 600)
         self.layout = QVBoxLayout(self)
         
-        # Crear la tabla para mostrar los análisis unitarios asociados
-        self.table = QTableWidget(self)
-        self.layout.addWidget(self.table)
-        self.setup_table()
-        self.load_data()  # Aquí se cargarían los datos reales (por ejemplo, consultando la BD)
+        # Encabezado con el código del presupuesto
+        header_label = QLabel(f"Recursos asociados al presupuesto: {codigo_presupuesto}")
+        header_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.layout.addWidget(header_label)
         
-        # Crear los botones para agregar y actualizar
+        # Crear formulario para agregar análisis manualmente
+        self.create_form()
+        # Crear la tabla (QTableView con QStandardItemModel)
+        self.create_table()
+        # Se deja la función load_data vacía, ya que la invoca el controlador
+        # (aquí solo se define la interfaz)
+        
+        # Botones adicionales (por ejemplo, para abrir selector o actualizar)
         self.setup_buttons()
-
-    def setup_table(self):
-        # Definimos 4 columnas: Código, Descripción, Unidad y Total
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["Código Análisis", "Descripción", "Unidad", "Total"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        
+        self.setLayout(self.layout)
+        self.setStyleSheet("""
+            QTableView {
+                background-color: #f9f9f9;
+                alternate-background-color: #e0e0e0;
+                gridline-color: #cccccc;
+            }
+            QHeaderView::section {
+                background-color: #0078d7;
+                color: white;
+                padding: 4px; 
+                font-weight: bold;
+            }
+            QPushButton {
+                background-color: #007ACC;
+                color: white;
+                border-radius: 4px;
+                padding: 8px;
+            }
+            QPushButton:hover {
+                background-color: #005A9E;
+            }
+            QLineEdit {
+                padding: 4px;
+                border: 1px solid #cccccc;
+                border-radius: 4px;
+            }
+        """)
     
-    def load_data(self):
-        # Datos de ejemplo; en la versión final estos datos vendrán de tu modelo o base de datos
-        sample_data = [
-            {"codigo": "01-01-01", "descripcion": "CORTE ARBOL MAS RETIRO (INCL.RAICES)H>3.0", "unidad": "UND", "total": 106594.0},
-            {"codigo": "01-01-02", "descripcion": "CORTE Y RETIRO DE ARBUSTO", "unidad": "UND", "total": 9735.0},
-            {"codigo": "01-01-03", "descripcion": "DEMOL.CAMARA DE CONCRETO", "unidad": "UND", "total": 177396.0},
-            {"codigo": "01-01-04", "descripcion": "DEMOL.LOSA CONCRETO E<=20CMS", "unidad": "M2", "total": 29615.0},
-            {"codigo": "01-01-05", "descripcion": "DEMOL.LOSA CONCRETO E<=15CMS", "unidad": "M2", "total": 25220.0}
-        ]
-        self.table.setRowCount(len(sample_data))
-        for row, item in enumerate(sample_data):
-            self.table.setItem(row, 0, QTableWidgetItem(item["codigo"]))
-            self.table.setItem(row, 1, QTableWidgetItem(item["descripcion"]))
-            self.table.setItem(row, 2, QTableWidgetItem(item["unidad"]))
-            self.table.setItem(row, 3, QTableWidgetItem(f"{item['total']:.2f}"))
+    def create_form(self):
+        """Crea el formulario para agregar un nuevo análisis manualmente."""
+        self.form_layout = QHBoxLayout()
+        self.codigo_analisis_input = QLineEdit()
+        self.codigo_analisis_input.setPlaceholderText("Código Análisis")
+        self.descripcion_input = QLineEdit()
+        self.descripcion_input.setPlaceholderText("Descripción Análisis")
+        self.unidad_input = QLineEdit()
+        self.unidad_input.setPlaceholderText("Unidad Análisis")
+        self.cantidad_input = QLineEdit()
+        self.cantidad_input.setPlaceholderText("Cantidad Análisis")
+        self.vr_unitario_input = QLineEdit()
+        self.vr_unitario_input.setPlaceholderText("Valor Unitario")
+        self.vr_parcial_input = QLineEdit()
+        self.vr_parcial_input.setPlaceholderText("Valor Parcial")
+        self.add_form_button = QPushButton("Agregar a Tabla")
+        
+
+        self.form_layout.addWidget(QLabel("Código Análisis:"))
+        self.form_layout.addWidget(self.codigo_analisis_input)
+        self.form_layout.addWidget(QLabel("Descripción:"))
+        self.form_layout.addWidget(self.descripcion_input)
+        self.form_layout.addWidget(QLabel("Unidad:"))
+        self.form_layout.addWidget(self.unidad_input)
+        self.form_layout.addWidget(QLabel("Cantidad:"))
+        self.form_layout.addWidget(self.cantidad_input)
+        self.form_layout.addWidget(QLabel("Valor Unitario:"))
+        self.form_layout.addWidget(self.vr_unitario_input)
+        self.form_layout.addWidget(QLabel("Valor Parcial:"))
+        self.form_layout.addWidget(self.vr_parcial_input)
+        self.form_layout.addWidget(self.add_form_button)
+        
+        self.layout.addLayout(self.form_layout)
+        # Nota: La conexión del botón se hará en el controlador para incluir lógica adicional
+        # (pero también puede conectarse aquí si se prefiere, en este ejemplo se conecta en el controlador).
+    
+    def create_table(self):
+        """Crea la tabla usando QTableView y QStandardItemModel."""
+        self.table = QTableView()
+        self.model = QStandardItemModel()
+        self.model.setHorizontalHeaderLabels([
+            "Código Análisis", "Descripción", "Unidad",
+            "Cantidad", "Valor Unitario", "Valor Parcial"
+        ])
+        self.table.setModel(self.model)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        # Habilitar edición en todas las celdas
+        from PyQt6.QtWidgets import QAbstractItemView
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.AllEditTriggers)
+        self.layout.addWidget(self.table)
+        # (Opcional) Conectar doble clic, si se requiere abrir un selector de análisis
+        # self.table.doubleClicked.connect(lambda index: self.analisis_selected_por_presupuesto.emit(self.model.item(index.row(), 0).text()))
     
     def setup_buttons(self):
-        # Layout horizontal para los botones
-        button_layout = QHBoxLayout()
-        self.add_button = QPushButton("Agregar Análisis")
+        """Crea botones para abrir el selector y actualizar el presupuesto."""
+        self.button_layout = QHBoxLayout()
+        self.add_button = QPushButton("Seleccionar Análisis")
         self.update_button = QPushButton("Actualizar Presupuesto")
-        
-        self.add_button.clicked.connect(self.add_analysis_row)
-        self.update_button.clicked.connect(self.update_presupuesto)
-        
-        button_layout.addWidget(self.add_button)
-        button_layout.addWidget(self.update_button)
-        self.layout.addLayout(button_layout)
+        self.button_layout.addWidget(self.add_button)
+        self.button_layout.addWidget(self.update_button)
+        self.layout.addLayout(self.button_layout)
     
-    def add_analysis_row(self):
-        # Agrega una fila vacía en la tabla para que el usuario ingrese un nuevo análisis
-        row_position = self.table.rowCount()
-        self.table.insertRow(row_position)
-        for col in range(self.table.columnCount()):
-            self.table.setItem(row_position, col, QTableWidgetItem(""))
-
-    def update_presupuesto(self):
-        # Aquí se recopilan los datos de la tabla y se actualizará el presupuesto en la BD.
-        # Por ahora, mostramos un mensaje informativo.
-        QMessageBox.information(self, "Actualizar Presupuesto", 
-            f"Se actualizará el presupuesto {self.codigo_presupuesto} con los análisis ingresados.")
-    
-# Ejemplo de cómo ejecutar esta vista por sí sola (modo prueba):
-if __name__ == "__main__":
-    import sys
-    from PyQt6.QtWidgets import QApplication
-    app = QApplication(sys.argv)
-    window = AnalisisPorPresupuestoView("PRESUP-001")
-    window.show()
-    sys.exit(app.exec())
+    def load_data(self, data):
+        """
+        Recibe una lista de diccionarios (cada uno con claves:
+        'codigo_analisis', 'descripcion_analisis', 'unidad_analisis',
+        'cantidad_analisis', 'vr_unitario', 'vr_total').
+        """
+        self.model.removeRows(0, self.model.rowCount())
+        for analisis in data:
+            row = [
+                QStandardItem(analisis.get("codigo_analisis", analisis.get("codigo_analisis", ""))),
+                QStandardItem(analisis.get("descripcion_analisis", analisis.get("descripcion_analisis", ""))),
+                QStandardItem(str(analisis.get("unidad_analisis", analisis.get("unidad_analisis", 0)))),
+                QStandardItem(str(analisis.get("cantidad_analisis", analisis.get("cantidad_analisis", 0)))),
+                QStandardItem(str(analisis.get("vr_unitario", 0))),
+                QStandardItem(str(analisis.get("vr_total", 0))),
+            ]
+            self.model.appendRow(row)
