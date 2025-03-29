@@ -87,21 +87,33 @@ class PresupuestoView(QWidget):
             # Conectar la señal de selección de análisis
             self.analisis_controller.view.analysis_selected.connect(self.on_analisis_selected_from_search)
         
-        # Aplicar filtros de búsqueda solo si tienen contenido
+        # Obtener valores de los campos de búsqueda
         codigo = self.codigo_search.text().strip()
         descripcion = self.descripcion_search.text().strip()
         
-        # Limpiar los filtros actuales
+        # Desconectar temporalmente los eventos de cambio de texto para evitar interferencias
+        try:
+            self.analisis_controller.view.search_code_input.textChanged.disconnect()
+            self.analisis_controller.view.search_desc_input.textChanged.disconnect()
+        except:
+            pass  # Si no estaban conectadas, ignorar el error
+        
+        # Limpiar y establecer los valores en campos separados
         self.analisis_controller.view.search_code_input.clear()
         self.analisis_controller.view.search_desc_input.clear()
         
-        # Aplicar solo los filtros que tengan contenido
         if codigo:
             self.analisis_controller.view.search_code_input.setText(codigo)
         if descripcion:
             self.analisis_controller.view.search_desc_input.setText(descripcion)
         
-        # Forzar la actualización de los filtros
+        # Reconectar los eventos
+        self.analisis_controller.view.search_code_input.textChanged.connect(
+            self.analisis_controller.view.apply_filters)
+        self.analisis_controller.view.search_desc_input.textChanged.connect(
+            self.analisis_controller.view.apply_filters)
+        
+        # Aplicar filtros manualmente
         self.analisis_controller.view.apply_filters()
         
         # Mostrar la ventana
