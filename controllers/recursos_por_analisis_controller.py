@@ -112,10 +112,6 @@ class RecursosPorAnalisisController(QObject):
         # Aquí podrías agregar lógica adicional si es necesario.
 
     def update_analysis(self):
-        """
-        Recorre el modelo, elimina los registros actuales de este análisis en la BD,
-        inserta los datos actuales del modelo y recalcula el total del análisis.
-        """
         session = SessionLocal()
         try:
             # Borrar registros actuales para este análisis
@@ -126,7 +122,13 @@ class RecursosPorAnalisisController(QObject):
             total_actualizado = 0.0
             row_count = self.view.model.rowCount()
             for row in range(row_count):
+                # Lee el texto de la primera columna (código recurso)
                 codigo_recurso = self.view.model.item(row, 0).text().strip()
+                
+                # SALTAR filas que son solo encabezados (las que empiezan con ===)
+                if codigo_recurso.startswith("==="):
+                    continue
+
                 descripcion = self.view.model.item(row, 1).text().strip()
                 unidad = self.view.model.item(row, 2).text().strip()
                 try:
@@ -167,8 +169,11 @@ class RecursosPorAnalisisController(QObject):
                 print(f"[DEBUG] Nuevo total del análisis {self.codigo_analisis}: {total_actualizado}")
 
             session.commit()
-            QMessageBox.information(self.view, "Actualización Exitosa",
-                                    f"Análisis {self.codigo_analisis} actualizado.\nNuevo Total: {total_actualizado:.2f}")
+            QMessageBox.information(
+                self.view, 
+                "Actualización Exitosa",
+                f"Análisis {self.codigo_analisis} actualizado.\nNuevo Total: {total_actualizado:.2f}"
+            )
         except Exception as e:
             session.rollback()
             QMessageBox.critical(self.view, "Error", f"Error al actualizar análisis: {e}")
@@ -176,6 +181,7 @@ class RecursosPorAnalisisController(QObject):
         finally:
             session.close()
             self.load_recurso_por_analisis()
+
 
     def on_item_changed(self, topLeft, bottomRight, roles):
         """

@@ -13,7 +13,7 @@ class AnalisisUnitario(Base):
     unidad = Column(String, nullable=False)
     total = Column(Float, nullable=False)  # Esta columna podría ser eliminada si usas solo el híbrido
 
-    recursos_asociados = relationship("AnalisisUnitarioRecurso", back_populates="analisis")
+    recursos_asociados = relationship("AnalisisUnitarioRecurso", back_populates="analisis", passive_deletes=True)
     presupuestos_asociados = relationship("PresupuestoAnalisisUnitario", back_populates="analisis")
 
     @hybrid_property
