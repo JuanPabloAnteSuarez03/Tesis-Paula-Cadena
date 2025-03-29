@@ -7,7 +7,11 @@ class AnalisisUnitarioRecurso(Base):
     __tablename__ = "analisis_unitarios_recursos"
 
     id = Column(Integer, primary_key=True)
-    codigo_analisis = Column(String, ForeignKey("analisis_unitarios.codigo"), nullable=False)
+    codigo_analisis = Column(
+        String,
+        ForeignKey("analisis_unitarios.codigo", ondelete="CASCADE"),
+        nullable=False
+)
     codigo_recurso = Column(String, ForeignKey("recursos.codigo"), nullable=False)
     descripcion_recurso = Column(String, nullable=False)
     unidad_recurso = Column(String, nullable=False)
