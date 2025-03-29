@@ -127,20 +127,69 @@ class RecursosPorAnalisisView(QWidget):
         self.layout.addLayout(self.button_layout)
     
     def load_data(self, data):
-        """
-        Recibe una lista de diccionarios (cada uno con claves:
-        'codigo_recurso', 'descripcion', 'unidad', 'cantidad', 'desperdicio',
-        'valor_unitario', 'valor_parcial') y llena la tabla.
-        """
         self.model.removeRows(0, self.model.rowCount())
+
+        mano_obra = []
+        equipo = []
+        materiales = []
+
         for resource in data:
-            row = [
-                QStandardItem(str(resource.get("codigo_recurso", resource.get("codigo", "")))),
-                QStandardItem(resource.get("descripcion", resource.get("descripcion_recurso", ""))),
-                QStandardItem(resource.get("unidad", resource.get("unidad_recurso", ""))),
-                QStandardItem(str(resource.get("cantidad", resource.get("cantidad_recurso", 0)))),
-                QStandardItem(str(resource.get("desperdicio", resource.get("desper", 0)))),
-                QStandardItem(str(resource.get("valor_unitario", 0))),
-                QStandardItem(str(resource.get("valor_parcial", 0))),
-            ]
-            self.model.appendRow(row)
+            codigo = str(resource.get("codigo_recurso", resource.get("codigo", ""))).upper()
+            if codigo.startswith("MO"):
+                mano_obra.append(resource)
+            elif codigo.startswith("MQ"):
+                equipo.append(resource)
+            else:
+                materiales.append(resource)
+
+        def add_section_header(titulo):
+            # Crea la celda con el título en la primera columna
+            item_titulo = QStandardItem(titulo)
+            font = item_titulo.font()
+            font.setBold(True)
+            item_titulo.setFont(font)
+            # Quita la editabilidad
+            item_titulo.setFlags(item_titulo.flags() & ~Qt.ItemFlag.ItemIsEditable)
+
+            # Para las demás columnas, creamos items vacíos y los marcamos como no editables
+            empty_items = []
+            for _ in range(6):  # si son 7 columnas en total, ya usamos 1 para el título
+                empty = QStandardItem("")
+                empty.setFlags(empty.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                empty_items.append(empty)
+
+            self.model.appendRow([item_titulo] + empty_items)
+
+        def add_resources(resources_list):
+            for res in resources_list:
+                row_items = [
+                    QStandardItem(str(res.get("codigo_recurso", res.get("codigo", "")))),
+                    QStandardItem(str(res.get("descripcion", res.get("descripcion_recurso", "")))),
+                    QStandardItem(str(res.get("unidad", res.get("unidad_recurso", "")))),
+                    QStandardItem(str(res.get("cantidad", res.get("cantidad_recurso", 0)))),
+                    QStandardItem(str(res.get("desperdicio", res.get("desper", 0)))),
+                    QStandardItem(str(res.get("valor_unitario", 0))),
+                    QStandardItem(str(res.get("valor_parcial", 0))),
+                ]
+                # Suponiendo que la columna de "Valor Parcial" es la última (índice 6),
+                # deshabilitamos la edición SOLO en esa columna para las filas normales:
+                row_items[6].setFlags(row_items[6].flags() & ~Qt.ItemFlag.ItemIsEditable)
+
+                self.model.appendRow(row_items)
+
+        # Insertar las secciones
+        if mano_obra:
+            add_section_header("=== MANO DE OBRA ===")
+            add_resources(mano_obra)
+
+        if equipo:
+            add_section_header("====== EQUIPO ======")
+            add_resources(equipo)
+
+        if materiales:
+            add_section_header("==== MATERIALES ====")
+            add_resources(materiales)
+
+        # Ajustar ancho de la primera columna
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(0, 155)
