@@ -193,8 +193,11 @@ class AnalisisUnitariosView(QWidget):
         desc_filter = self.search_desc_input.text().strip().lower()
         
         for row in range(self.table.rowCount()):
+            # Columna 0: Código, Columna 1: Descripción
             code_item = self.table.item(row, 0)
             desc_item = self.table.item(row, 1)
+            
+            # Obtener los textos de las celdas
             code = code_item.text().lower() if code_item else ""
             desc = desc_item.text().lower() if desc_item else ""
             
