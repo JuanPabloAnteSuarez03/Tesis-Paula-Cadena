@@ -90,8 +90,8 @@ class AnalisisUnitariosView(QWidget):
         self.search_desc_input = QLineEdit()
         self.search_desc_input.setPlaceholderText("Buscar por Descripción")
 
-        self.search_code_input.textChanged.connect(self.on_search_clicked)
-        self.search_desc_input.textChanged.connect(self.on_search_clicked)
+        self.search_code_input.textChanged.connect(self.apply_filters)
+        self.search_desc_input.textChanged.connect(self.apply_filters)
 
         self.search_layout.addWidget(QLabel("Código:"))
         self.search_layout.addWidget(self.search_code_input)
@@ -100,14 +100,16 @@ class AnalisisUnitariosView(QWidget):
         self.layout.addLayout(self.search_layout)
 
     def create_table(self):
+        """Crea la tabla para mostrar los análisis unitarios."""
         self.table = QTableWidget()
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["Código", "Descripción", "Unidad", "Total"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        # Habilitar el ordenamiento al hacer clic en los encabezados
         self.table.setSortingEnabled(True)
         self.layout.addWidget(self.table)
-
-        # Doble clic -> selección de análisis
+        
+        # Conectar el doble clic para emitir la señal de selección
         self.table.cellDoubleClicked.connect(self.on_cell_double_clicked)
 
     def load_data(self, data):
@@ -175,21 +177,37 @@ class AnalisisUnitariosView(QWidget):
         self.unidad_input.clear()
         self.total_input.clear()
 
-    def on_search_clicked(self):
+    def apply_filters(self, codigo_filter="", descripcion_filter=""):
+        """
+        Aplica los filtros de búsqueda a la tabla.
+        Si se proporcionan filtros, se establecen en los campos de búsqueda.
+        """
+        # Solo establecer los filtros si se proporcionan explícitamente
+        if codigo_filter:
+            self.search_code_input.setText(codigo_filter)
+        if descripcion_filter:
+            self.search_desc_input.setText(descripcion_filter)
+        
+        # Obtener los valores actuales de los campos de búsqueda
         code_filter = self.search_code_input.text().strip().lower()
         desc_filter = self.search_desc_input.text().strip().lower()
-
+        
         for row in range(self.table.rowCount()):
             code_item = self.table.item(row, 0)
             desc_item = self.table.item(row, 1)
             code = code_item.text().lower() if code_item else ""
             desc = desc_item.text().lower() if desc_item else ""
-            row_visible = (code_filter in code) and (desc_filter in desc)
-            self.table.setRowHidden(row, not row_visible)
+            
+            # Aplicar los filtros de manera independiente
+            code_match = True if not code_filter else code_filter in code
+            desc_match = True if not desc_filter else desc_filter in desc
+            
+            # La fila es visible si cumple con ambos filtros
+            self.table.setRowHidden(row, not (code_match and desc_match))
 
     def on_cell_double_clicked(self, row, column):
+        """Emite la señal con el código del análisis cuando se hace doble clic."""
         codigo_item = self.table.item(row, 0)
         if codigo_item:
             codigo = codigo_item.text()
-            QMessageBox.information(self, "Análisis Seleccionado", f"Se seleccionó: {codigo}")
             self.analysis_selected.emit(codigo)

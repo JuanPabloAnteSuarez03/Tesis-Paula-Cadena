@@ -109,9 +109,6 @@ class MainWindow(QMainWindow):
         self.presupuesto_controller = PresupuestoController()
         presupuesto_view_widget = self.presupuesto_controller.view
 
-        # Conectar la señal 'presupuesto_selected' para que llame a show_analisis_por_presupuesto
-        presupuesto_view_widget.presupuesto_selected.connect(self.show_analisis_por_presupuesto)
-
         # Agregar la vista al StackedWidget si no está ya
         index = self.stacked_widget.indexOf(presupuesto_view_widget)
         if index == -1:
@@ -120,11 +117,8 @@ class MainWindow(QMainWindow):
         self.stacked_widget.setCurrentIndex(index)
 
     def show_analisis_por_presupuesto(self, codigo_presupuesto):
-        # Instanciar el controlador y obtener su vista
-        self.presupuesto_analisis_controller = PresupuestoAnalisisUnitarioController(codigo_presupuesto)
-        view_widget = self.presupuesto_analisis_controller.view
-        # En lugar de agregarlo al stacked, simplemente lo mostramos como ventana independiente:
-        view_widget.show()
+        # Ya no necesitamos esta función ya que los análisis se manejan directamente en la vista de presupuesto
+        pass
 
 
 if __name__ == "__main__":

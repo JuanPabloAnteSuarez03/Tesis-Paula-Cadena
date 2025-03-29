@@ -1,25 +1,28 @@
-# views/analisis_unitarios_view.py
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QHeaderView, QPushButton, QLineEdit, QLabel, QMessageBox
+    QHeaderView, QPushButton, QLineEdit, QLabel, QMessageBox, QFileDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from controllers.recursos_por_analisis_controller import RecursosPorAnalisisController
+from controllers.analisis_unitarios_controller import AnalisisUnitariosController
+import csv
 
 class PresupuestoView(QWidget):
-    # Señal que se emite cuando se hace doble clic en una fila (para seleccionar un presupuesto)
-    presupuesto_selected = pyqtSignal(str)
-    # Señal que se emite cuando se solicita agregar un nuevo presupuesto
-    add_presupuesto = pyqtSignal(dict)
+    analisis_selected = pyqtSignal(str)
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Presupuestos")
-        self.resize(800, 600)
+        self.setWindowTitle("Presupuesto")
+        self.resize(1000, 600)
         self.layout = QVBoxLayout(self)
-        self.create_form()
-        self.create_search_form()
+        
+        # Crear el buscador de análisis
+        self.create_search_bar()
+        self.create_buttons()
         self.create_table()
+        
+        # Crear y configurar el controlador de análisis
+        self.analisis_controller = None
+        
         self.setLayout(self.layout)
         self.setStyleSheet("""
             QTableWidget {
@@ -38,135 +41,276 @@ class PresupuestoView(QWidget):
                 color: white;
                 border-radius: 4px;
                 padding: 8px;
+                min-width: 120px;
             }
             QPushButton:hover {
                 background-color: #005A9E;
             }
             QLineEdit {
-                padding: 4px;
+                padding: 6px;
                 border: 1px solid #cccccc;
                 border-radius: 4px;
+                min-width: 200px;
             }
         """)
-        
-    def create_form(self):
-        # Formulario para agregar un nuevo análisis unitario
-        self.form_layout = QHBoxLayout()
-        self.codigo_input = QLineEdit()
-        self.codigo_input.setPlaceholderText("Código")
-        self.descripcion_input = QLineEdit()
-        self.descripcion_input.setPlaceholderText("Descripción")
-        self.total_input = QLineEdit()
-        self.total_input.setPlaceholderText("Total")
-        self.add_button = QPushButton("Agregar Presupuesto")
-        self.add_button.clicked.connect(self.on_add_clicked)
-        
-        self.form_layout.addWidget(QLabel("Código:"))
-        self.form_layout.addWidget(self.codigo_input)
-        self.form_layout.addWidget(QLabel("Descripción:"))
-        self.form_layout.addWidget(self.descripcion_input)
-        self.form_layout.addWidget(QLabel("Total:"))
-        self.form_layout.addWidget(self.total_input)
-        self.form_layout.addWidget(self.add_button)
-        self.layout.addLayout(self.form_layout)
-    
-    def create_search_form(self):
-        # Formulario de búsqueda para filtrar por código y descripción
-        self.search_layout = QHBoxLayout()
-        self.search_code_input = QLineEdit()
-        self.search_code_input.setPlaceholderText("Buscar por Código")
-        self.search_desc_input = QLineEdit()
-        self.search_desc_input.setPlaceholderText("Buscar por Descripción")
-        # En lugar de usar un botón, conectamos directamente las señales textChanged
-        self.search_code_input.textChanged.connect(self.on_search_clicked)
-        self.search_desc_input.textChanged.connect(self.on_search_clicked)
-        
-        self.search_layout.addWidget(QLabel("Código:"))
-        self.search_layout.addWidget(self.search_code_input)
-        self.search_layout.addWidget(QLabel("Descripción:"))
-        self.search_layout.addWidget(self.search_desc_input)
-        self.layout.addLayout(self.search_layout)
 
+    def create_search_bar(self):
+        """Crea la barra de búsqueda de análisis unitarios."""
+        search_layout = QHBoxLayout()
+        
+        # Campo de búsqueda por código
+        self.codigo_search = QLineEdit()
+        self.codigo_search.setPlaceholderText("Buscar por código")
+        
+        # Campo de búsqueda por descripción
+        self.descripcion_search = QLineEdit()
+        self.descripcion_search.setPlaceholderText("Buscar por descripción")
+        
+        # Botón de búsqueda
+        self.search_button = QPushButton("Buscar Análisis")
+        self.search_button.clicked.connect(self.show_analisis_search)
+        
+        # Agregar widgets al layout
+        search_layout.addWidget(QLabel("Código:"))
+        search_layout.addWidget(self.codigo_search)
+        search_layout.addWidget(QLabel("Descripción:"))
+        search_layout.addWidget(self.descripcion_search)
+        search_layout.addWidget(self.search_button)
+        search_layout.addStretch()
+        
+        self.layout.addLayout(search_layout)
+
+    def show_analisis_search(self):
+        """Muestra la ventana de búsqueda de análisis unitarios."""
+        if not self.analisis_controller:
+            self.analisis_controller = AnalisisUnitariosController()
+            # Conectar la señal de selección de análisis
+            self.analisis_controller.view.analysis_selected.connect(self.on_analisis_selected_from_search)
+        
+        # Aplicar filtros de búsqueda solo si tienen contenido
+        codigo = self.codigo_search.text().strip()
+        descripcion = self.descripcion_search.text().strip()
+        
+        # Limpiar los filtros actuales
+        self.analisis_controller.view.search_code_input.clear()
+        self.analisis_controller.view.search_desc_input.clear()
+        
+        # Aplicar solo los filtros que tengan contenido
+        if codigo:
+            self.analisis_controller.view.search_code_input.setText(codigo)
+        if descripcion:
+            self.analisis_controller.view.search_desc_input.setText(descripcion)
+        
+        # Forzar la actualización de los filtros
+        self.analisis_controller.view.apply_filters()
+        
+        # Mostrar la ventana
+        self.analisis_controller.view.show()
+
+    def on_analisis_selected_from_search(self, codigo):
+        """Maneja la selección de un análisis desde la ventana de búsqueda."""
+        self.analisis_selected.emit(codigo)
+        if self.analisis_controller:
+            self.analisis_controller.view.hide()
+
+    def create_buttons(self):
+        """Crea los botones para importar/exportar CSV."""
+        button_layout = QHBoxLayout()
+        
+        self.import_button = QPushButton("Importar CSV")
+        self.export_button = QPushButton("Exportar CSV")
+        
+        self.import_button.clicked.connect(self.import_csv)
+        self.export_button.clicked.connect(self.export_csv)
+        
+        button_layout.addWidget(self.import_button)
+        button_layout.addWidget(self.export_button)
+        button_layout.addStretch()
+        
+        self.layout.addLayout(button_layout)
     
     def create_table(self):
-        """Crea la tabla para mostrar los presupuestos."""
+        """Crea la tabla para mostrar los análisis unitarios del presupuesto."""
         self.table = QTableWidget()
-        self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderLabels(["Código", "Descripción", "Total"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        # Habilitar el ordenamiento al hacer clic en los encabezados
-        self.table.setSortingEnabled(True)
+        self.table.setColumnCount(7)
+        self.table.setHorizontalHeaderLabels([
+            "Código", "Item", "Descripción", "Unidad", 
+            "Cantidad", "Costo Unitario", "Costo Total"
+        ])
+        
+        # Configurar el ancho de las columnas
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # Código
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Item
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)          # Descripción
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Unidad
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Cantidad
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # Costo Unitario
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)  # Costo Total
+        
         self.layout.addWidget(self.table)
         
-        # Conectar el doble clic para emitir la señal de selección
-        self.table.cellDoubleClicked.connect(self.on_cell_double_clicked)
-
-    
-    def load_data(self, data):
-        """
-        Recibe una lista de diccionarios con las claves:
-          'codigo', 'descripcion', y 'total'
-        y llena la tabla.
-        """
-        self.table.blockSignals(True)
-        self.table.setRowCount(len(data))
-        for row, item in enumerate(data):
-            self.table.setItem(row, 0, QTableWidgetItem(item.get("codigo", "")))
-            self.table.setItem(row, 1, QTableWidgetItem(item.get("descripcion", "")))
-            self.table.setItem(row, 2, QTableWidgetItem(f"{item.get('total', 0):.2f}"))
-        self.table.blockSignals(False)
-    
-    def on_add_clicked(self):
-        """
-        Se dispara al presionar el botón "Agregar Presupuesto".
-        Emite la señal add_presupuesto con los datos del formulario.
-        """
-        data = self.get_data_from_form()
-        if not data["codigo"] or not data["descripcion"]:
-            QMessageBox.warning(self, "Datos incompletos", "Código y Descripción son obligatorios.")
-            return
-        self.add_presupuesto.emit(data)
-        self.clear_form()
-    
-    def get_data_from_form(self):
-        """Lee los datos del formulario y los retorna en un diccionario."""
-        codigo = self.codigo_input.text().strip()
-        descripcion = self.descripcion_input.text().strip()
-        try:
-            total = float(self.total_input.text().strip())
-        except ValueError:
-            total = 0.0
-        return {"codigo": codigo, "descripcion": descripcion, "total": total}
-    
-    def clear_form(self):
-        """Limpia los campos del formulario."""
-        self.codigo_input.clear()
-        self.descripcion_input.clear()
-        self.total_input.clear()
-    
-    def on_search_clicked(self):
-        """Filtra la tabla en función de los campos de búsqueda."""
-        code_filter = self.search_code_input.text().strip().lower()
-        desc_filter = self.search_desc_input.text().strip().lower()
+        # Agregar fila para el total
+        self.total_label = QLabel("Total del Presupuesto: $0.00")
+        self.total_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.total_label.setStyleSheet("font-size: 16px; font-weight: bold; padding: 10px;")
+        self.layout.addWidget(self.total_label)
         
+        # Conectar el evento de cambio de celda
+        self.table.itemChanged.connect(self.on_cell_changed)
+
+    def add_analisis(self, analisis_data):
+        """Agrega un análisis unitario a la tabla."""
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        
+        # Crear y configurar todos los QTableWidgetItem primero
+        items = []
+        for col in range(7):
+            item = QTableWidgetItem()
+            if col != 4:  # La columna 4 es "Cantidad"
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            items.append(item)
+            self.table.setItem(row, col, item)
+        
+        # Establecer los valores
+        items[0].setText(analisis_data['codigo'])
+        items[1].setText(str(row + 1))
+        items[2].setText(analisis_data['descripcion'])
+        items[3].setText(analisis_data['unidad'])
+        items[4].setText('1')  # Cantidad por defecto
+        items[5].setText(f"{analisis_data['costo_unitario']:.2f}")
+        items[6].setText('0.00')  # Se actualizará con update_row_total
+        
+        # Actualizar totales
+        self.update_row_total(row)
+        self.update_total_presupuesto()
+
+    def on_cell_changed(self, item):
+        """Maneja los cambios en las celdas de la tabla."""
+        if not item or item.column() != 4:  # Solo procesar cambios en la columna cantidad
+            return
+            
+        try:
+            text = item.text().strip()
+            if not text:  # Si está vacío, establecer en 1
+                item.setText('1')
+                cantidad = 1.0
+            else:
+                cantidad = float(text)
+                if cantidad < 0:
+                    raise ValueError("La cantidad no puede ser negativa")
+            
+            # Bloquear señales para evitar recursión
+            self.table.blockSignals(True)
+            self.update_row_total(item.row())
+            self.update_total_presupuesto()
+            self.table.blockSignals(False)
+            
+        except ValueError:
+            self.table.blockSignals(True)
+            item.setText('1')
+            self.update_row_total(item.row())
+            self.update_total_presupuesto()
+            self.table.blockSignals(False)
+            QMessageBox.warning(self, "Error", "Por favor ingrese un número válido positivo")
+
+    def update_row_total(self, row):
+        """Actualiza el costo total de una fila."""
+        try:
+            # Asegurarnos de que todos los items existan
+            cantidad_item = self.table.item(row, 4)
+            costo_item = self.table.item(row, 5)
+            total_item = self.table.item(row, 6)
+            
+            if not all([cantidad_item, costo_item, total_item]):
+                return
+            
+            # Obtener los valores
+            cantidad_text = cantidad_item.text().strip()
+            costo_text = costo_item.text().strip()
+            
+            # Convertir a números
+            cantidad = float(cantidad_text) if cantidad_text else 1.0
+            costo_unitario = float(costo_text) if costo_text else 0.0
+            
+            # Calcular y establecer el total
+            total = cantidad * costo_unitario
+            total_item.setText(f"{total:.2f}")
+            
+        except (ValueError, AttributeError):
+            # Si hay algún error, establecer valores por defecto
+            if self.table.item(row, 4):
+                self.table.item(row, 4).setText('1')
+            if self.table.item(row, 6):
+                self.table.item(row, 6).setText('0.00')
+
+    def update_total_presupuesto(self):
+        """Actualiza el total del presupuesto."""
+        total = 0.0
         for row in range(self.table.rowCount()):
-            code_item = self.table.item(row, 0)
-            desc_item = self.table.item(row, 1)
-            code = code_item.text().lower() if code_item else ""
-            desc = desc_item.text().lower() if desc_item else ""
-            # Se muestra la fila solo si ambos filtros se cumplen
-            row_visible = (code_filter in code) and (desc_filter in desc)
-            self.table.setRowHidden(row, not row_visible)
+            try:
+                total += float(self.table.item(row, 6).text())
+            except (ValueError, AttributeError):
+                continue
+        self.total_label.setText(f"Total del Presupuesto: ${total:,.2f}")
 
+    def export_csv(self):
+        """Exporta la tabla a un archivo CSV."""
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Guardar Presupuesto", "", "CSV Files (*.csv)"
+        )
+        if filename:
+            with open(filename, 'w', newline='', encoding='utf-8') as file:
+                writer = csv.writer(file)
+                # Escribir encabezados
+                headers = []
+                for col in range(self.table.columnCount()):
+                    headers.append(self.table.horizontalHeaderItem(col).text())
+                writer.writerow(headers)
+                
+                # Escribir datos
+                for row in range(self.table.rowCount()):
+                    row_data = []
+                    for col in range(self.table.columnCount()):
+                        item = self.table.item(row, col)
+                        row_data.append(item.text() if item else "")
+                    writer.writerow(row_data)
+                
+                # Escribir el total
+                writer.writerow([])
+                writer.writerow(["Total del Presupuesto", self.total_label.text()])
 
-
-    
-    def on_cell_double_clicked(self, row, column):
-        # Emite la señal con el código del análisis cuando se hace doble clic
-        codigo_item = self.table.item(row, 0)
-        if codigo_item:
-
-            codigo = codigo_item.text()
-            QMessageBox.information(self, "Presupuesto Seleccionado", f"Se seleccionó: {codigo}")
-            self.presupuesto_selected.emit(codigo)
-
+    def import_csv(self):
+        """Importa datos desde un archivo CSV."""
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Importar Presupuesto", "", "CSV Files (*.csv)"
+        )
+        if filename:
+            try:
+                with open(filename, 'r', encoding='utf-8') as file:
+                    reader = csv.reader(file)
+                    # Saltar la fila de encabezados
+                    next(reader)
+                    
+                    # Limpiar tabla actual
+                    self.table.setRowCount(0)
+                    
+                    # Leer datos
+                    for row_data in reader:
+                        if not row_data or row_data[0] == "Total del Presupuesto":
+                            break
+                            
+                        row = self.table.rowCount()
+                        self.table.insertRow(row)
+                        
+                        for col, value in enumerate(row_data):
+                            item = QTableWidgetItem(value)
+                            if col != 4:  # La columna 4 es "Cantidad"
+                                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                            self.table.setItem(row, col, item)
+                    
+                    self.update_total_presupuesto()
+                    
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Error al importar el archivo: {str(e)}")
