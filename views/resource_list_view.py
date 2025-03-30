@@ -43,20 +43,27 @@ class ResourceListView(QWidget):
     def init_ui(self):
         layout = QVBoxLayout(self)
         
-        # Formulario de búsqueda
-        search_layout = QHBoxLayout()
+        # Formulario de búsqueda en la parte superior
+        search_container = QWidget()
+        search_layout = QHBoxLayout(search_container)
         self.search_code_input = QLineEdit()
         self.search_code_input.setPlaceholderText("Buscar por Código")
         self.search_desc_input = QLineEdit()
         self.search_desc_input.setPlaceholderText("Buscar por Descripción")
+        
         search_layout.addWidget(QLabel("Código:"))
         search_layout.addWidget(self.search_code_input)
         search_layout.addWidget(QLabel("Descripción:"))
         search_layout.addWidget(self.search_desc_input)
-        layout.addLayout(search_layout)
         
-        # Formulario para agregar recurso
-        form_layout = QHBoxLayout()
+        layout.addWidget(search_container)
+        
+        # Formulario para agregar recurso en el medio
+        form_container = QWidget()
+        form_layout = QVBoxLayout(form_container)
+        
+        # Campos del formulario
+        fields_layout = QHBoxLayout()
         self.codigo_input = QLineEdit()
         self.codigo_input.setPlaceholderText("Código")
         self.descripcion_input = QLineEdit()
@@ -65,21 +72,34 @@ class ResourceListView(QWidget):
         self.unidad_input.setPlaceholderText("Unidad")
         self.valor_input = QLineEdit()
         self.valor_input.setPlaceholderText("Valor Unitario")
-        self.add_button = QPushButton("Agregar Recurso")
-        form_layout.addWidget(QLabel("Código:"))
-        form_layout.addWidget(self.codigo_input)
-        form_layout.addWidget(QLabel("Descripción:"))
-        form_layout.addWidget(self.descripcion_input)
-        form_layout.addWidget(QLabel("Unidad:"))
-        form_layout.addWidget(self.unidad_input)
-        form_layout.addWidget(QLabel("Valor Unitario:"))
-        form_layout.addWidget(self.valor_input)
-        form_layout.addWidget(self.add_button)
         
-        # Botón para eliminar recurso
+        fields_layout.addWidget(QLabel("Código:"))
+        fields_layout.addWidget(self.codigo_input)
+        fields_layout.addWidget(QLabel("Descripción:"))
+        fields_layout.addWidget(self.descripcion_input)
+        fields_layout.addWidget(QLabel("Unidad:"))
+        fields_layout.addWidget(self.unidad_input)
+        fields_layout.addWidget(QLabel("Valor Unitario:"))
+        fields_layout.addWidget(self.valor_input)
+        
+        # Botones centrados en una línea separada
+        buttons_layout = QHBoxLayout()
+        buttons_layout.addStretch(1)  # Espacio a la izquierda para centrar
+        
+        self.add_button = QPushButton("Agregar Recurso")
+        self.add_button.setMinimumWidth(140)
         self.delete_button = QPushButton("Eliminar Recurso")
-        form_layout.addWidget(self.delete_button)
-        layout.addLayout(form_layout)
+        self.delete_button.setMinimumWidth(140)
+        
+        buttons_layout.addWidget(self.add_button)
+        buttons_layout.addWidget(self.delete_button)
+        buttons_layout.addStretch(1)  # Espacio a la derecha para centrar
+        
+        # Agregar los layouts al contenedor del formulario
+        form_layout.addLayout(fields_layout)
+        form_layout.addLayout(buttons_layout)
+        
+        layout.addWidget(form_container)
         
         # Crear el QTableView y el modelo asociado
         self.table_view = QTableView(self)
@@ -100,35 +120,38 @@ class ResourceListView(QWidget):
         self.search_code_input.textChanged.connect(self.proxy_model.setCodeFilter)
         self.search_desc_input.textChanged.connect(self.proxy_model.setDescFilter)
         
-        self.setLayout(layout)
+        # Conectar botones a sus funciones respectivas
+        self.add_button.clicked.connect(self.on_add_button_clicked)
+        self.delete_button.clicked.connect(self.on_delete_button_clicked)
+        
+        # Estilo para botones y tabla
         self.setStyleSheet("""
             QTableView {
                 background-color: #f9f9f9;
                 alternate-background-color: #e0e0e0;
                 gridline-color: #cccccc;
+                font-size: 13px;
             }
             QHeaderView::section {
-                background-color: #007ACC;
+                background-color: #0078d7;
                 color: white;
-                padding: 4px;
-                border: 1px solid #6c6c6c;
+                padding: 8px;
+                font-weight: bold;
+                border: 0px;
             }
             QPushButton {
                 background-color: #007ACC;
                 color: white;
                 border-radius: 4px;
                 padding: 8px;
+                min-width: 140px;
             }
             QPushButton:hover {
                 background-color: #005A9E;
             }
         """)
         
-        # Conectar el botón agregar
-        self.add_button.clicked.connect(self.on_add_button_clicked)
-        # Conectar el botón eliminar
-        self.delete_button.clicked.connect(self.on_delete_button_clicked)
-
+        self.setLayout(layout)
 
     def load_data(self, data):
         """

@@ -128,19 +128,52 @@ class PresupuestoView(QWidget):
     def create_buttons(self):
         """Crea los botones para importar/exportar CSV."""
         button_layout = QHBoxLayout()
+        button_layout.addStretch(1)  # Espacio a la izquierda para centrar
         
         self.import_button = QPushButton("Importar CSV")
         self.export_button = QPushButton("Exportar CSV")
+        self.delete_row_button = QPushButton("Eliminar Fila")
         
         self.import_button.clicked.connect(self.import_csv)
         self.export_button.clicked.connect(self.export_csv)
+        self.delete_row_button.clicked.connect(self.delete_selected_row)
         
         button_layout.addWidget(self.import_button)
         button_layout.addWidget(self.export_button)
-        button_layout.addStretch()
+        button_layout.addWidget(self.delete_row_button)
+        button_layout.addStretch(1)  # Espacio a la derecha para centrar
         
         self.layout.addLayout(button_layout)
-    
+
+    def delete_selected_row(self):
+        """Elimina la fila seleccionada del presupuesto."""
+        selected_items = self.table.selectedItems()
+        if not selected_items:
+            QMessageBox.warning(self, "Advertencia", "Por favor, seleccione una fila para eliminar.")
+            return
+        
+        # Obtener la fila seleccionada (tomamos el primer ítem seleccionado)
+        row = selected_items[0].row()
+        
+        # Pedir confirmación antes de eliminar
+        codigo_item = self.table.item(row, 0)
+        if codigo_item:
+            codigo = codigo_item.text()
+            descripcion_item = self.table.item(row, 2)
+            descripcion = descripcion_item.text() if descripcion_item else ""
+            
+            confirmacion = QMessageBox.question(
+                self,
+                "Confirmar eliminación",
+                f"¿Está seguro de eliminar la fila '{codigo} - {descripcion}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            
+            if confirmacion == QMessageBox.StandardButton.Yes:
+                self.table.removeRow(row)
+                self.update_total_presupuesto()
+                QMessageBox.information(self, "Eliminado", "La fila ha sido eliminada correctamente.")
+
     def create_table(self):
         """Crea la tabla para mostrar los análisis unitarios del presupuesto."""
         self.table = QTableWidget()
