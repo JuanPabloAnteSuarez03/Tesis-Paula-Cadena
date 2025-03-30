@@ -1,13 +1,15 @@
 # views/analisis_unitarios_view.py
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QHeaderView, QPushButton, QLineEdit, QLabel, QMessageBox
+    QHeaderView, QPushButton, QLineEdit, QLabel, QMessageBox, QApplication
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import pyqtSignal, Qt
 
 class AnalisisUnitariosView(QWidget):
     # Señal que se emite cuando se hace doble clic en una fila (para seleccionar un análisis)
     analysis_selected = pyqtSignal(str)
+    # Nueva señal para emitir cuando se hace Shift+Click en un análisis
+    analysis_edit_requested = pyqtSignal(str)
     # Señal que se emite cuando se solicita agregar un nuevo análisis unitario
     add_analysis = pyqtSignal(dict)
     # Señal que se emite cuando se solicita eliminar un análisis unitario (por código)
@@ -18,9 +20,12 @@ class AnalisisUnitariosView(QWidget):
         self.setWindowTitle("Análisis Unitarios")
         self.resize(800, 600)
         self.layout = QVBoxLayout(self)
-        self.create_form()
+        
+        # Cambiamos el orden: primero búsqueda, luego formulario
         self.create_search_form()
+        self.create_form()
         self.create_table()
+        
         self.setLayout(self.layout)
         self.setStyleSheet("""
             QTableWidget {
@@ -39,6 +44,7 @@ class AnalisisUnitariosView(QWidget):
                 color: white;
                 border-radius: 4px;
                 padding: 8px;
+                min-width: 140px;
             }
             QPushButton:hover {
                 background-color: #005A9E;
@@ -52,7 +58,12 @@ class AnalisisUnitariosView(QWidget):
 
     def create_form(self):
         # Formulario para agregar un nuevo análisis unitario
-        self.form_layout = QHBoxLayout()
+        form_container = QWidget()
+        form_layout = QVBoxLayout(form_container)
+        
+        # Campos del formulario arriba
+        fields_layout = QHBoxLayout()
+        
         self.codigo_input = QLineEdit()
         self.codigo_input.setPlaceholderText("Código")
         self.descripcion_input = QLineEdit()
@@ -61,30 +72,46 @@ class AnalisisUnitariosView(QWidget):
         self.unidad_input.setPlaceholderText("Unidad")
         self.total_input = QLineEdit()
         self.total_input.setPlaceholderText("Total")
+        
+        fields_layout.addWidget(QLabel("Código:"))
+        fields_layout.addWidget(self.codigo_input)
+        fields_layout.addWidget(QLabel("Descripción:"))
+        fields_layout.addWidget(self.descripcion_input)
+        fields_layout.addWidget(QLabel("Unidad:"))
+        fields_layout.addWidget(self.unidad_input)
+        fields_layout.addWidget(QLabel("Total:"))
+        fields_layout.addWidget(self.total_input)
+        
+        # Botones en una línea separada abajo
+        buttons_layout = QHBoxLayout()
+        buttons_layout.addStretch(1)  # Espacio a la izquierda para centrar
+        
+        # Botón de agregar análisis
         self.add_button = QPushButton("Agregar Análisis")
+        self.add_button.setAccessibleName("action_button")
         self.add_button.clicked.connect(self.on_add_clicked)
-
-        self.form_layout.addWidget(QLabel("Código:"))
-        self.form_layout.addWidget(self.codigo_input)
-        self.form_layout.addWidget(QLabel("Descripción:"))
-        self.form_layout.addWidget(self.descripcion_input)
-        self.form_layout.addWidget(QLabel("Unidad:"))
-        self.form_layout.addWidget(self.unidad_input)
-        self.form_layout.addWidget(QLabel("Total:"))
-        self.form_layout.addWidget(self.total_input)
-        self.form_layout.addWidget(self.add_button)
-
-        # --- Botón para eliminar análisis ---
+        
+        # Botón para eliminar análisis
         self.delete_button = QPushButton("Eliminar Análisis")
+        self.delete_button.setAccessibleName("action_button")
         self.delete_button.clicked.connect(self.on_delete_clicked)
-        self.form_layout.addWidget(self.delete_button)
-        # ------------------------------------
-
-        self.layout.addLayout(self.form_layout)
+        
+        buttons_layout.addWidget(self.add_button)
+        buttons_layout.addWidget(self.delete_button)
+        buttons_layout.addStretch(1)  # Espacio a la derecha para centrar
+        
+        # Añadir ambos layouts al contenedor
+        form_layout.addLayout(fields_layout)
+        form_layout.addLayout(buttons_layout)
+        
+        # Añadir el contenedor al layout principal
+        self.layout.addWidget(form_container)
 
     def create_search_form(self):
-        # Formulario de búsqueda
-        self.search_layout = QHBoxLayout()
+        # Formulario de búsqueda en la parte superior
+        search_container = QWidget()
+        search_layout = QHBoxLayout(search_container)
+        
         self.search_code_input = QLineEdit()
         self.search_code_input.setPlaceholderText("Buscar por Código")
         self.search_desc_input = QLineEdit()
@@ -93,11 +120,13 @@ class AnalisisUnitariosView(QWidget):
         self.search_code_input.textChanged.connect(self.apply_filters)
         self.search_desc_input.textChanged.connect(self.apply_filters)
 
-        self.search_layout.addWidget(QLabel("Código:"))
-        self.search_layout.addWidget(self.search_code_input)
-        self.search_layout.addWidget(QLabel("Descripción:"))
-        self.search_layout.addWidget(self.search_desc_input)
-        self.layout.addLayout(self.search_layout)
+        search_layout.addWidget(QLabel("Código:"))
+        search_layout.addWidget(self.search_code_input)
+        search_layout.addWidget(QLabel("Descripción:"))
+        search_layout.addWidget(self.search_desc_input)
+        
+        # Añadir el contenedor al layout principal
+        self.layout.addWidget(search_container)
 
     def create_table(self):
         """Crea la tabla para mostrar los análisis unitarios."""
@@ -107,10 +136,18 @@ class AnalisisUnitariosView(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         # Habilitar el ordenamiento al hacer clic en los encabezados
         self.table.setSortingEnabled(True)
-        self.layout.addWidget(self.table)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
         
         # Conectar el doble clic para emitir la señal de selección
         self.table.cellDoubleClicked.connect(self.on_cell_double_clicked)
+        
+        # Nueva conexión: conectar la señal cellClicked (clic simple) a la función on_cell_clicked
+        self.table.cellClicked.connect(self.on_cell_clicked)
+        
+        # Añadir la tabla al layout principal
+        self.layout.addWidget(self.table)
 
     def load_data(self, data):
         self.table.blockSignals(True)
@@ -207,6 +244,20 @@ class AnalisisUnitariosView(QWidget):
             
             # La fila es visible si cumple con ambos filtros
             self.table.setRowHidden(row, not (code_match and desc_match))
+
+    def on_cell_clicked(self, row, column):
+        """
+        Maneja el evento de clic en una celda de la tabla.
+        Si Shift está presionado, emite la señal para editar el análisis.
+        """
+        # Verificar si la tecla Shift está presionada
+        modifiers = QApplication.keyboardModifiers()
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            codigo_item = self.table.item(row, 0)
+            if codigo_item:
+                codigo = codigo_item.text()
+                print(f"Shift+Click en análisis: {codigo} - Abrir editor de recursos")
+                self.analysis_edit_requested.emit(codigo)
 
     def on_cell_double_clicked(self, row, column):
         """Emite la señal con el código del análisis cuando se hace doble clic."""
