@@ -1,9 +1,10 @@
 # controllers/analisis_unitarios_controller.py
 from PyQt6.QtCore import QObject
-from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtWidgets import QMessageBox, QDialog, QVBoxLayout
 from models.analisis_unitario import AnalisisUnitario
 from models.database import SessionLocal
 from views.analisis_unitarios_view import AnalisisUnitariosView
+from controllers.recursos_por_analisis_controller import RecursosPorAnalisisController
 
 class AnalisisUnitariosController(QObject):
     def __init__(self, parent=None):
@@ -20,6 +21,8 @@ class AnalisisUnitariosController(QObject):
         # --- Conectar eliminación de análisis ---
         self.view.analysis_delete_requested.connect(self.delete_analysis)
         # ----------------------------------------
+        # Conectar la nueva señal para abrir recursos por análisis
+        self.view.analysis_edit_requested.connect(self.on_edit_analysis_resources)
 
     def load_analisis_unitarios(self):
         session = SessionLocal()
@@ -118,3 +121,25 @@ class AnalisisUnitariosController(QObject):
 
     def on_analysis_selected(self, codigo):
         print(f"Análisis seleccionado: {codigo}")
+
+    def on_edit_analysis_resources(self, codigo):
+        """
+        Abre un diálogo modal con la vista de recursos por análisis
+        cuando se hace Shift+Click en un análisis unitario.
+        """
+        print(f"Abriendo recursos para el análisis: {codigo}")
+        
+        # Crear el diálogo
+        dialog = QDialog(self.view)
+        dialog.setWindowTitle(f"Recursos del Análisis: {codigo}")
+        dialog.resize(800, 600)
+        
+        # Crear el controlador de recursos por análisis
+        recursos_controller = RecursosPorAnalisisController(codigo)
+        
+        # Configurar el layout del diálogo
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(recursos_controller.view)
+        
+        # Mostrar el diálogo modal
+        dialog.exec()
