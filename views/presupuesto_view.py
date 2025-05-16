@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QHeaderView, QPushButton, QLineEdit, QLabel, QMessageBox, QFileDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from controllers.insertar_item_controller import InsertarItemController
+from controllers.analisis_unitarios_controller import AnalisisUnitariosController
 import csv
 
 class PresupuestoView(QWidget):
@@ -52,49 +52,30 @@ class PresupuestoView(QWidget):
                 border-radius: 4px;
                 min-width: 200px;
             }
-
-            QPushButton:disabled {
-                background-color: #cccccc;
-                color: #666666;
-            }
         """)
 
     def create_search_bar(self):
         """Crea la barra de búsqueda de análisis unitarios."""
         search_layout = QHBoxLayout()
         
+        # Campo de búsqueda por código
+        self.codigo_search = QLineEdit()
+        self.codigo_search.setPlaceholderText("Buscar por código")
+        
+        # Campo de búsqueda por descripción
+        self.descripcion_search = QLineEdit()
+        self.descripcion_search.setPlaceholderText("Buscar por descripción")
         
         # Botón de búsqueda
-        self.search_button = QPushButton("Insertar Item")
+        self.search_button = QPushButton("Buscar Análisis")
         self.search_button.clicked.connect(self.show_analisis_search)
-        self.import_button = QPushButton("Importar CSV")
-        self.export_button = QPushButton("Exportar CSV")
-        self.delete_row_button = QPushButton("Eliminar Item")
-
-
-        self.modify_description = QPushButton("Modificar descripcion")
-        self.modify_description.setEnabled(False)
-        self.modify_description.clicked.connect(self.enable_description_editing)
-        
-        # Conecta el botón con sus funciones
-        self.import_button.clicked.connect(self.import_csv)
-        self.export_button.clicked.connect(self.export_csv)
-        self.delete_row_button.clicked.connect(self.delete_selected_row)
-        #self.modify_description.connect(self.delete_selected_row)
-        
         
         # Agregar widgets al layout
+        search_layout.addWidget(QLabel("Código:"))
+        search_layout.addWidget(self.codigo_search)
+        search_layout.addWidget(QLabel("Descripción:"))
+        search_layout.addWidget(self.descripcion_search)
         search_layout.addWidget(self.search_button)
-        
-
-        search_layout.addWidget(self.import_button)
-        search_layout.addWidget(self.export_button)
-        search_layout.addWidget(self.delete_row_button)
-
-        # quiero que este solo se active cuando yo toque un item que ya esté agregado y yo toque un item
-        # de la tabla
-        search_layout.addWidget(self.modify_description)
-        
         search_layout.addStretch()
         
         self.layout.addLayout(search_layout)
@@ -102,11 +83,14 @@ class PresupuestoView(QWidget):
     def show_analisis_search(self):
         """Muestra la ventana de búsqueda de análisis unitarios."""
         if not self.analisis_controller:
-            self.analisis_controller = InsertarItemController()
+            self.analisis_controller = AnalisisUnitariosController()
             # Conectar la señal de selección de análisis
             self.analisis_controller.view.analysis_selected.connect(self.on_analisis_selected_from_search)
-
-
+        
+        # Obtener valores de los campos de búsqueda
+        codigo = self.codigo_search.text().strip()
+        descripcion = self.descripcion_search.text().strip()
+        
         # Desconectar temporalmente los eventos de cambio de texto para evitar interferencias
         try:
             self.analisis_controller.view.search_code_input.textChanged.disconnect()
@@ -118,6 +102,10 @@ class PresupuestoView(QWidget):
         self.analisis_controller.view.search_code_input.clear()
         self.analisis_controller.view.search_desc_input.clear()
         
+        if codigo:
+            self.analisis_controller.view.search_code_input.setText(codigo)
+        if descripcion:
+            self.analisis_controller.view.search_desc_input.setText(descripcion)
         
         # Reconectar los eventos
         self.analisis_controller.view.search_code_input.textChanged.connect(
@@ -142,7 +130,17 @@ class PresupuestoView(QWidget):
         button_layout = QHBoxLayout()
         button_layout.addStretch(1)  # Espacio a la izquierda para centrar
         
+        self.import_button = QPushButton("Importar CSV")
+        self.export_button = QPushButton("Exportar CSV")
+        self.delete_row_button = QPushButton("Eliminar Fila")
         
+        self.import_button.clicked.connect(self.import_csv)
+        self.export_button.clicked.connect(self.export_csv)
+        self.delete_row_button.clicked.connect(self.delete_selected_row)
+        
+        button_layout.addWidget(self.import_button)
+        button_layout.addWidget(self.export_button)
+        button_layout.addWidget(self.delete_row_button)
         button_layout.addStretch(1)  # Espacio a la derecha para centrar
         
         self.layout.addLayout(button_layout)
@@ -198,15 +196,13 @@ class PresupuestoView(QWidget):
         self.layout.addWidget(self.table)
         
         # Agregar fila para el total
-        self.total_label = QLabel("TOTAL COSTOS DIRECTOS: $0.00")
+        self.total_label = QLabel("Total del Presupuesto: $0.00")
         self.total_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.total_label.setStyleSheet("font-size: 16px; font-weight: bold; padding: 10px;")
         self.layout.addWidget(self.total_label)
         
         # Conectar el evento de cambio de celda
         self.table.itemChanged.connect(self.on_cell_changed)
-        # Conectar el evento con cambio de descripción
-        self.table.itemSelectionChanged.connect(self.on_selection_changed)
 
     def add_analisis(self, analisis_data):
         """Agrega un análisis unitario a la tabla."""
@@ -236,80 +232,33 @@ class PresupuestoView(QWidget):
         self.update_total_presupuesto()
 
     def on_cell_changed(self, item):
-
         """Maneja los cambios en las celdas de la tabla."""
-        if not item or (item.column() != 4 and item.column() != 2):
-            return 
-
-        # Si el usuario borra el contenido, restaurar el valor anterior
-        if item.column() == 2 and not item.text().strip():
-            self.table.blockSignals(True)
-            item.setText(self.descripcion_anterior)
-            self.table.blockSignals(False)
-
-        if item.column() == 4:
-
-            try:
-                text = item.text().strip()
-                if not text:  # Si está vacío, establecer en 1
-                    item.setText('1')
-                    cantidad = 1.0
-                else:
-                    cantidad = float(text)
-                    if cantidad < 0:
-                        raise ValueError("La cantidad no puede ser negativa")
-                
-                # Bloquear señales para evitar recursión
-                self.table.blockSignals(True)
-                self.update_row_total(item.row())
-                self.update_total_presupuesto()
-                self.table.blockSignals(False)
-                
-            except ValueError:
-                self.table.blockSignals(True)
+        if not item or item.column() != 4:  # Solo procesar cambios en la columna cantidad
+            return
+            
+        try:
+            text = item.text().strip()
+            if not text:  # Si está vacío, establecer en 1
                 item.setText('1')
-                self.update_row_total(item.row())
-                self.update_total_presupuesto()
-                self.table.blockSignals(False)
-                QMessageBox.warning(self, "Error", "Por favor ingrese un número válido positivo")
-           
-
-    def on_selection_changed(self):
-        #Activa o desactiva el botón de modificar según si hay una fila seleccionada
-        selected_items = self.table.selectedItems()
-        self.modify_description.setEnabled(bool(selected_items))
-
-    def enable_description_editing(self):
-    #Permite editar la celda de descripción (columna 2) de la fila seleccionada
-    
-        selected_items = self.table.selectedItems()
-        if not selected_items:
-            return
-
-        row = selected_items[0].row()
-        self.descripcion_item = self.table.item(row, 2)
-
-        if self.descripcion_item:
-            self.descripcion_anterior = self.descripcion_item.text()
-            self.descripcion_item.setFlags(self.descripcion_item.flags() | Qt.ItemFlag.ItemIsEditable)
-            self.table.editItem(self.descripcion_item)
-
-    def confirm_description_edit(self):
-
-        """Confirma el cambio en la descripción al presionar Enter o salir."""
-        if not self.descripcion_item:
-            return
-
-        new_text = self.descripcion_item.text().strip()
-        if not new_text:
+                cantidad = 1.0
+            else:
+                cantidad = float(text)
+                if cantidad < 0:
+                    raise ValueError("La cantidad no puede ser negativa")
+            
+            # Bloquear señales para evitar recursión
             self.table.blockSignals(True)
-            self.descripcion_item.setText(self.descripcion_anterior)
+            self.update_row_total(item.row())
+            self.update_total_presupuesto()
             self.table.blockSignals(False)
-
-        # Siempre bloquear después de editar
-        self.descripcion_item.setFlags(self.descripcion_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-
-        self.descripcion_item = None  # limpiamos para el siguiente uso
+            
+        except ValueError:
+            self.table.blockSignals(True)
+            item.setText('1')
+            self.update_row_total(item.row())
+            self.update_total_presupuesto()
+            self.table.blockSignals(False)
+            QMessageBox.warning(self, "Error", "Por favor ingrese un número válido positivo")
 
     def update_row_total(self, row):
         """Actualiza el costo total de una fila."""
@@ -349,7 +298,7 @@ class PresupuestoView(QWidget):
                 total += float(self.table.item(row, 6).text())
             except (ValueError, AttributeError):
                 continue
-        self.total_label.setText(f"TOTAL COSTOS DIRECTOS: ${total:,.2f}")
+        self.total_label.setText(f"Total del Presupuesto: ${total:,.2f}")
 
     def export_csv(self):
         """Exporta la tabla a un archivo CSV."""
@@ -375,7 +324,7 @@ class PresupuestoView(QWidget):
                 
                 # Escribir el total
                 writer.writerow([])
-                writer.writerow(["TOTAL COSTOS DIRECTOS", self.total_label.text()])
+                writer.writerow(["Total del Presupuesto", self.total_label.text()])
 
     def import_csv(self):
         """Importa datos desde un archivo CSV."""
@@ -394,7 +343,7 @@ class PresupuestoView(QWidget):
                     
                     # Leer datos
                     for row_data in reader:
-                        if not row_data or row_data[0] == "TOTAL COSTOS DIRECTOS":
+                        if not row_data or row_data[0] == "Total del Presupuesto":
                             break
                             
                         row = self.table.rowCount()

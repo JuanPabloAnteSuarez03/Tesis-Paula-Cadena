@@ -5,7 +5,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 # Datos de conexión
 DB_NAME = "app_presupuestos"
 DB_USER = "postgres"
-DB_PASSWORD = "Diego"
+DB_PASSWORD = "123Randy"
 DB_HOST = "localhost"
 DB_PORT = "5432"
 
