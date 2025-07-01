@@ -64,23 +64,15 @@ class AnalisisUnitariosView(QWidget):
         # Campos del formulario arriba
         fields_layout = QHBoxLayout()
         
-        self.codigo_input = QLineEdit()
-        self.codigo_input.setPlaceholderText("Código")
         self.descripcion_input = QLineEdit()
         self.descripcion_input.setPlaceholderText("Descripción")
         self.unidad_input = QLineEdit()
         self.unidad_input.setPlaceholderText("Unidad")
-        self.total_input = QLineEdit()
-        self.total_input.setPlaceholderText("Total")
         
-        fields_layout.addWidget(QLabel("Código:"))
-        fields_layout.addWidget(self.codigo_input)
         fields_layout.addWidget(QLabel("Descripción:"))
         fields_layout.addWidget(self.descripcion_input)
         fields_layout.addWidget(QLabel("Unidad:"))
         fields_layout.addWidget(self.unidad_input)
-        fields_layout.addWidget(QLabel("Total:"))
-        fields_layout.addWidget(self.total_input)
         
         # Botones en una línea separada abajo
         buttons_layout = QHBoxLayout()
@@ -117,8 +109,8 @@ class AnalisisUnitariosView(QWidget):
         self.search_desc_input = QLineEdit()
         self.search_desc_input.setPlaceholderText("Buscar por Descripción")
 
-        self.search_code_input.textChanged.connect(self.apply_filters)
-        self.search_desc_input.textChanged.connect(self.apply_filters)
+        self.search_code_input.textChanged.connect(lambda: self.apply_filters())
+        self.search_desc_input.textChanged.connect(lambda: self.apply_filters())
 
         search_layout.addWidget(QLabel("Código:"))
         search_layout.addWidget(self.search_code_input)
@@ -133,7 +125,13 @@ class AnalisisUnitariosView(QWidget):
         self.table = QTableWidget()
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["Código", "Descripción", "Unidad", "Total"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # Código
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)          # Descripción
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Unidad
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Total
+
         # Habilitar el ordenamiento al hacer clic en los encabezados
         self.table.setSortingEnabled(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -154,15 +152,22 @@ class AnalisisUnitariosView(QWidget):
         self.table.setRowCount(len(data))
         for row, item in enumerate(data):
             self.table.setItem(row, 0, QTableWidgetItem(item.get("codigo", "")))
-            self.table.setItem(row, 1, QTableWidgetItem(item.get("descripcion", "")))
+            
+            descripcion = item.get("descripcion", "")
+            descripcion_item = QTableWidgetItem(descripcion)
+            descripcion_item.setToolTip(descripcion)
+            self.table.setItem(row, 1, descripcion_item)
+            
             self.table.setItem(row, 2, QTableWidgetItem(item.get("unidad", "")))
-            self.table.setItem(row, 3, QTableWidgetItem(f"{item.get('total', 0):.2f}"))
+            
+            total_value = item.get('total', 0)
+            self.table.setItem(row, 3, QTableWidgetItem(f"${total_value:,.2f}"))
         self.table.blockSignals(False)
 
     def on_add_clicked(self):
         data = self.get_data_from_form()
-        if not data["codigo"] or not data["descripcion"]:
-            QMessageBox.warning(self, "Datos incompletos", "Código y Descripción son obligatorios.")
+        if not data["descripcion"]:
+            QMessageBox.warning(self, "Datos incompletos", "La descripción es obligatoria.")
             return
         self.add_analysis.emit(data)
         self.clear_form()
@@ -199,32 +204,19 @@ class AnalisisUnitariosView(QWidget):
             self.analysis_delete_requested.emit(codigo)
 
     def get_data_from_form(self):
-        codigo = self.codigo_input.text().strip()
         descripcion = self.descripcion_input.text().strip()
         unidad = self.unidad_input.text().strip()
-        try:
-            total = float(self.total_input.text().strip())
-        except ValueError:
-            total = 0.0
-        return {"codigo": codigo, "descripcion": descripcion, "unidad": unidad, "total": total}
+        return {"descripcion": descripcion, "unidad": unidad}
 
     def clear_form(self):
-        self.codigo_input.clear()
         self.descripcion_input.clear()
         self.unidad_input.clear()
-        self.total_input.clear()
 
-    def apply_filters(self, codigo_filter="", descripcion_filter=""):
+    def apply_filters(self):
         """
         Aplica los filtros de búsqueda a la tabla.
         Si se proporcionan filtros, se establecen en los campos de búsqueda.
         """
-        # Solo establecer los filtros si se proporcionan explícitamente
-        if codigo_filter:
-            self.search_code_input.setText(codigo_filter)
-        if descripcion_filter:
-            self.search_desc_input.setText(descripcion_filter)
-        
         # Obtener los valores actuales de los campos de búsqueda
         code_filter = self.search_code_input.text().strip().lower()
         desc_filter = self.search_desc_input.text().strip().lower()

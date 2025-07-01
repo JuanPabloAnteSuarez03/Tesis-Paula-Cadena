@@ -168,8 +168,8 @@ class RecursosPorAnalisisView(QWidget):
                     QStandardItem(str(res.get("unidad", res.get("unidad_recurso", "")))),
                     QStandardItem(str(res.get("cantidad", res.get("cantidad_recurso", 0)))),
                     QStandardItem(str(res.get("desperdicio", res.get("desper", 0)))),
-                    QStandardItem(str(res.get("valor_unitario", 0))),
-                    QStandardItem(str(res.get("valor_parcial", 0))),
+                    QStandardItem(f"${res.get('valor_unitario', 0):,.2f}"),
+                    QStandardItem(f"${res.get('valor_parcial', 0):,.2f}"),
                 ]
                 # Suponiendo que la columna de "Valor Parcial" es la última (índice 6),
                 # deshabilitamos la edición SOLO en esa columna para las filas normales:
@@ -193,3 +193,9 @@ class RecursosPorAnalisisView(QWidget):
         # Ajustar ancho de la primera columna
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(0, 155)
+
+    def get_form_data(self):
+        # Obtiene los datos del formulario manual
+        codigo_recurso = self.codigo_input.text().strip()
+        descripcion = self.descripcion_input.text().strip()
+        # ... existing code ...

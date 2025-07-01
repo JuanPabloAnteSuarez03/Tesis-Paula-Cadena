@@ -11,7 +11,7 @@ class AnalisisUnitario(Base):
     codigo = Column(String, unique=True, nullable=False)
     descripcion = Column(String, nullable=False)
     unidad = Column(String, nullable=False)
-    total = Column(Float, nullable=False)  # Esta columna podría ser eliminada si usas solo el híbrido
+    total = Column(Float, nullable=False, default=0.0)
 
     recursos_asociados = relationship("AnalisisUnitarioRecurso", back_populates="analisis", passive_deletes=True)
     presupuestos_asociados = relationship("PresupuestoAnalisisUnitario", back_populates="analisis")

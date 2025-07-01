@@ -1,6 +1,6 @@
 # controllers/recursos_por_analisis_controller.py
 import traceback
-from PyQt6.QtCore import QObject
+from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtWidgets import QMessageBox, QDialog, QVBoxLayout, QPushButton
 from PyQt6.QtGui import QStandardItem
 from models.analisis_unitario_recurso import AnalisisUnitarioRecurso
@@ -10,6 +10,9 @@ from models.recurso import Recurso
 from views.recursos_por_analisis_view import RecursosPorAnalisisView
 
 class RecursosPorAnalisisController(QObject):
+    # Señal que se emite cuando el análisis ha sido actualizado en la BD.
+    analysis_updated = pyqtSignal()
+    
     def __init__(self, codigo_analisis, parent=None):
         super().__init__(parent)
         self.codigo_analisis = codigo_analisis
@@ -102,8 +105,11 @@ class RecursosPorAnalisisController(QObject):
         self.view.model.setItem(row_position, 2, QStandardItem(resource.get("unidad", "")))
         self.view.model.setItem(row_position, 3, QStandardItem("0"))
         self.view.model.setItem(row_position, 4, QStandardItem("0"))
-        self.view.model.setItem(row_position, 5, QStandardItem(str(resource.get("valor_unitario", "0"))))
-        self.view.model.setItem(row_position, 6, QStandardItem("0"))
+        
+        valor_unitario = resource.get("valor_unitario", 0)
+        self.view.model.setItem(row_position, 5, QStandardItem(f"${valor_unitario:,.2f}"))
+        self.view.model.setItem(row_position, 6, QStandardItem("$0.00"))
+        
         dialog.accept()
 
     def on_add_form_button_clicked(self):
@@ -140,11 +146,13 @@ class RecursosPorAnalisisController(QObject):
                 except Exception:
                     desperdicio = 0.0
                 try:
-                    vr_unitario = float(self.view.model.item(row, 5).text())
+                    vr_unitario_text = self.view.model.item(row, 5).text().replace('$', '').replace(',', '')
+                    vr_unitario = float(vr_unitario_text)
                 except Exception:
                     vr_unitario = 0.0
                 try:
-                    vr_parcial = float(self.view.model.item(row, 6).text())
+                    vr_parcial_text = self.view.model.item(row, 6).text().replace('$', '').replace(',', '')
+                    vr_parcial = float(vr_parcial_text)
                 except Exception:
                     vr_parcial = 0.0
 
@@ -174,6 +182,8 @@ class RecursosPorAnalisisController(QObject):
                 "Actualización Exitosa",
                 f"Análisis {self.codigo_analisis} actualizado.\nNuevo Total: {total_actualizado:.2f}"
             )
+            # Emitir la señal de que el análisis ha sido actualizado
+            self.analysis_updated.emit()
         except Exception as e:
             session.rollback()
             QMessageBox.critical(self.view, "Error", f"Error al actualizar análisis: {e}")
@@ -202,14 +212,15 @@ class RecursosPorAnalisisController(QObject):
             except:
                 desperdicio = 0.0
             try:
-                vr_unitario = float(self.view.model.item(row, 5).text())
+                vr_unitario_text = self.view.model.item(row, 5).text().replace('$', '').replace(',', '')
+                vr_unitario = float(vr_unitario_text)
             except:
                 vr_unitario = 0.0
 
             # Calcular vr_parcial localmente
             vr_parcial = cantidad * (1 + desperdicio) * vr_unitario  # Asegúrate que la fórmula sea la correcta
             # Actualizamos la celda de vr_parcial
-            self.view.model.setItem(row, 6, QStandardItem(f"{vr_parcial:.2f}"))
+            self.view.model.setItem(row, 6, QStandardItem(f"${vr_parcial:,.2f}"))
             print(f"[DEBUG] on_item_changed: Fila {row} - vr_parcial recalculado: {vr_parcial:.2f}")
         finally:
             # Desbloqueamos las señales después de la actualización
