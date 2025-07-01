@@ -5,6 +5,7 @@ from models.database import SessionLocal
 from models.analisis_unitario_recurso import AnalisisUnitarioRecurso  # Import the missing model
 from views.resource_list_view import ResourceListView
 from PyQt6.QtWidgets import QMessageBox
+from sqlalchemy.exc import IntegrityError
 
 class ResourceController(QObject):
     def __init__(self):
@@ -32,6 +33,8 @@ class ResourceController(QObject):
                     "valor_unitario": r.valor_unitario
                 })
             self.view.load_data(data)
+        except Exception as e:
+            QMessageBox.critical(self.view, "Error", f"No se pudieron cargar los recursos: {e}")
         finally:
             session.close()
 
@@ -76,39 +79,45 @@ class ResourceController(QObject):
         finally:
             session.close()
 
-    def add_resource(self, codigo):
-        """
-        Lógica para agregar un recurso desde el formulario.
-        Emite una señal o actualiza directamente el modelo.
-        """
-        # Obtener los datos del formulario
-        codigo = self.view.codigo_input.text().strip()
-        descripcion = self.view.descripcion_input.text().strip()
-        unidad = self.view.unidad_input.text().strip()
-        try:
-            valor_unitario = float(self.view.valor_input.text().strip())
-        except ValueError:
-            valor_unitario = 0.0
-
-        if not codigo:
-            QMessageBox.warning(self.view, "Error", "El código es obligatorio.")
-            return
-
-        # Crear un nuevo recurso
-        nuevo_recurso = Recurso(codigo=codigo, descripcion=descripcion, unidad=unidad, valor_unitario=valor_unitario)
-
+    def add_resource(self, resource_data):
         session = SessionLocal()
         try:
-            session.add(nuevo_recurso)
+            # --- Generación de código automático ---
+            # Busca el código numérico más alto y lo incrementa.
+            numeric_codes = [int(r.codigo) for r in session.query(Recurso.codigo) if r.codigo.isdigit()]
+            
+            if not numeric_codes:
+                # Si no hay códigos numéricos, empezar desde un número base.
+                new_code_num = 100000
+            else:
+                new_code_num = max(numeric_codes) + 1
+            
+            new_code = str(new_code_num)
+
+            # Verificar si el código ya existe (poco probable pero es una buena práctica)
+            if session.query(Recurso).filter(Recurso.codigo == new_code).first():
+                 QMessageBox.warning(self.view, "Error", f"El código autogenerado '{new_code}' ya existe. Inténtelo de nuevo.")
+                 session.close()
+                 return
+
+            resource_data['codigo'] = new_code
+            new_resource = Recurso(**resource_data)
+            
+            session.add(new_resource)
             session.commit()
-            QMessageBox.information(self.view, "Agregado", f"El recurso '{codigo}' ha sido agregado.")
+            QMessageBox.information(self.view, "Éxito", f"Recurso agregado con el código '{new_code}'.")
             self.load_resources()
+        except IntegrityError:
+            session.rollback()
+            QMessageBox.warning(
+                self.view, "Error", f"Error de integridad al guardar el recurso."
+            )
         except Exception as e:
             session.rollback()
-            QMessageBox.critical(self.view, "Error", f"Error al agregar el recurso {codigo}: {e}")
+            QMessageBox.critical(self.view, "Error", f"No se pudo agregar el recurso: {e}")
         finally:
             session.close()
-   
+
     def delete_resource(self, codigo):
         session = SessionLocal()
         try:
