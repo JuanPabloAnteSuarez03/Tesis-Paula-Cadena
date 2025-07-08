@@ -7,6 +7,10 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
 from controllers.analisis_unitarios_controller import AnalisisUnitariosController
 import csv
+import re
+from models.profesional import Profesional
+from models.database import SessionLocal
+from views.administracion_window import AdministracionWindow
 
 class PresupuestoView(QWidget):
     analisis_selected = pyqtSignal(str)
@@ -18,6 +22,8 @@ class PresupuestoView(QWidget):
         self.resize(1000, 600)
         self.layout = QVBoxLayout(self)
         self.chapter_counter = 0
+        self.admin_cost_total = 0.0
+        self.direct_cost_total = 0.0
         
         # Crear el buscador de análisis
         self.create_search_bar()
@@ -137,23 +143,29 @@ class PresupuestoView(QWidget):
         self.add_chapter_button = QPushButton("Agregar Capítulo")
         self.edit_chapter_button = QPushButton("Editar Capítulo")
         self.delete_chapter_button = QPushButton("Eliminar Capítulo")
+        self.edit_analysis_button = QPushButton("Editar Análisis")
         self.import_button = QPushButton("Importar CSV")
         self.export_button = QPushButton("Exportar CSV")
         self.delete_row_button = QPushButton("Eliminar Fila")
+        self.aiu_button = QPushButton("AIU Profesionales")
         
         self.add_chapter_button.clicked.connect(self.prompt_add_chapter)
         self.edit_chapter_button.clicked.connect(self.prompt_edit_chapter)
         self.delete_chapter_button.clicked.connect(self.prompt_delete_chapter)
+        self.edit_analysis_button.clicked.connect(self.edit_selected_analysis)
         self.import_button.clicked.connect(self.import_csv)
         self.export_button.clicked.connect(self.export_csv)
         self.delete_row_button.clicked.connect(self.delete_selected_row)
+        self.aiu_button.clicked.connect(self.open_administracion_window)
         
         button_layout.addWidget(self.add_chapter_button)
         button_layout.addWidget(self.edit_chapter_button)
         button_layout.addWidget(self.delete_chapter_button)
+        button_layout.addWidget(self.edit_analysis_button)
         button_layout.addWidget(self.import_button)
         button_layout.addWidget(self.export_button)
         button_layout.addWidget(self.delete_row_button)
+        button_layout.addWidget(self.aiu_button)
         button_layout.addStretch(1)
         
         self.layout.addLayout(button_layout)
@@ -392,6 +404,12 @@ class PresupuestoView(QWidget):
         self.total_label.setStyleSheet("font-size: 16px; font-weight: bold; padding: 10px;")
         self.layout.addWidget(self.total_label)
         
+        # Desglose AIU
+        self.breakdown_label = QLabel("")
+        self.breakdown_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.breakdown_label.setStyleSheet("font-size: 13px; padding-right: 10px;")
+        self.layout.addWidget(self.breakdown_label)
+        
         # Conectar el evento de cambio de celda
         self.table.itemChanged.connect(self.on_cell_changed)
         self.table.cellClicked.connect(self.on_cell_clicked)
@@ -457,7 +475,7 @@ class PresupuestoView(QWidget):
         items = []
         for col in range(6):
             item = QTableWidgetItem()
-            if col != 3:  # La columna 3 es "Cantidad"
+            if col not in (2, 3):  # Columnas 2 (Unidad) y 3 (Cantidad) editables
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             items.append(item)
             self.table.setItem(insertion_row, col, item)
@@ -490,9 +508,10 @@ class PresupuestoView(QWidget):
 
     def on_cell_changed(self, item):
         """Maneja los cambios en las celdas de la tabla."""
-        if not item or item.column() != 3:  # Solo procesar cambios en la columna cantidad
+        # Solo procesar cambios en la columna Cantidad (índice 3)
+        if not item or item.column() != 3:
             return
-        
+            
         # Guardar la fila antes de cualquier procesamiento que pueda invalidar el item
         row = item.row()
         
@@ -522,7 +541,7 @@ class PresupuestoView(QWidget):
             # Verificar que la fila sigue siendo válida después de bloquear señales
             if row < self.table.rowCount():
                 self.update_row_total(row)
-                self.update_total_presupuesto()
+            self.update_total_presupuesto()
             
             self.table.blockSignals(False)
             
@@ -534,7 +553,7 @@ class PresupuestoView(QWidget):
                 item.setText('1')
                 if row < self.table.rowCount():
                     self.update_row_total(row)
-                    self.update_total_presupuesto()
+                self.update_total_presupuesto()
             except RuntimeError:
                 pass  # El item ha sido eliminado, no hacer nada
             
@@ -553,7 +572,7 @@ class PresupuestoView(QWidget):
             
             if not cantidad_item or not costo_unitario_item:
                 return
-
+            
             # Obtener los valores
             cantidad_text = cantidad_item.text().replace(',', '').strip()
             costo_text = costo_unitario_item.text().replace('$', '').replace(',', '').strip()
@@ -667,8 +686,37 @@ class PresupuestoView(QWidget):
             for subtotal_info in reversed(rows_to_insert_subtotals):
                 self.insert_subtotal_row(subtotal_info['position'], subtotal_info['total'])
             
-            # Actualizar el total del presupuesto
-            self.total_label.setText(f"Total del Presupuesto: ${total_presupuesto:,.2f}")
+            # Guardar costo directo
+            self.direct_cost_total = total_presupuesto
+
+            # Si existe AIU calculado con profesionales, incluirlo
+            admin_total = getattr(self, 'admin_cost_total', 0.0)
+            grand_total = total_presupuesto + admin_total
+
+            if admin_total > 0:
+                text = (
+                    f"Costo Directo: ${total_presupuesto:,.2f}   "
+                    f"AIU: ${admin_total:,.2f}   "
+                    f"Total Presupuesto: ${grand_total:,.2f}"
+                )
+            else:
+                text = f"Total del Presupuesto: ${total_presupuesto:,.2f}"
+
+            self.total_label.setText(text)
+            
+            # Update breakdown label
+            if admin_total > 0 and hasattr(self, 'aiu_breakdown'):
+                bd = self.aiu_breakdown
+                lines = [
+                    f"Administración: ${bd['admin']:,.2f}",
+                    f"Imprevistos ({bd['imprev_pct']:.2f}%): ${bd['imprev']:,.2f}",
+                    f"Utilidad ({bd['util_pct']:.2f}%): ${bd['util']:,.2f}",
+                    f"IVA Utilidad ({bd['iva_pct']:.2f}%): ${bd['iva']:,.2f}",
+                    f"Total Costos Indirectos: ${bd['total_aiu']:,.2f}"
+                ]
+                self.breakdown_label.setText("<br>".join(lines))
+            else:
+                self.breakdown_label.setText("")
             
         finally:
             # Siempre desbloquear señales
@@ -768,7 +816,28 @@ class PresupuestoView(QWidget):
                 row_data.append(codigo_analisis)
                 writer.writerow(row_data)
 
-        QMessageBox.information(self, "Exportado", "El presupuesto ha sido exportado a CSV sin incluir totales calculados.")
+            # ----- Bloque AIU -----
+            writer.writerow([])  # línea en blanco
+            writer.writerow(["COSTO DIRECTO", f"{self.direct_cost_total}"])
+
+            if hasattr(self, 'aiu_breakdown'):
+                bd = self.aiu_breakdown
+                writer.writerow(["ADMINISTRACIÓN", f"{bd['admin']}", f"{bd['admin'] / self.direct_cost_total * 100:.2f}%"])
+                writer.writerow(["IMPREVISTOS", f"{bd['imprev']}", f"{bd['imprev_pct']:.2f}%"])
+                writer.writerow(["UTILIDAD", f"{bd['util']}", f"{bd['util_pct']:.2f}%"])
+                writer.writerow(["IVA UTILIDAD", f"{bd['iva']}", f"{bd['iva_pct']:.2f}%"])
+                writer.writerow(["TOTAL COSTOS INDIRECTOS", f"{bd['total_aiu']}"])
+                total_pres = self.direct_cost_total + bd['total_aiu']
+                writer.writerow(["TOTAL PRESUPUESTO", f"{total_pres}"])
+            else:
+                writer.writerow(["ADMINISTRACIÓN", "$0.00"])
+                writer.writerow(["IMPREVISTOS", "$0.00"])
+                writer.writerow(["UTILIDAD", "$0.00"])
+                writer.writerow(["IVA UTILIDAD", "$0.00"])
+                writer.writerow(["TOTAL COSTOS INDIRECTOS", "$0.00"])
+                writer.writerow(["TOTAL PRESUPUESTO", f"{self.direct_cost_total}"])
+
+        QMessageBox.information(self, "Exportado", "El presupuesto y el desglose AIU se han exportado a CSV.")
 
     def import_csv(self):
         """Importa datos desde un archivo CSV al presupuesto y calcula automáticamente los totales."""
@@ -782,120 +851,78 @@ class PresupuestoView(QWidget):
         # Bloquear señales para evitar procesamientos intermedios (on_cell_changed, etc.)
         self.table.blockSignals(True)
 
-        with open(filePath, 'r', newline='', encoding='utf-8') as file:
+        total_rows_processed = 0
+        analysis_rows_added = 0
+
+        with open(filePath, 'r', encoding='utf-8') as file:
             reader = csv.reader(file)
-            header = next(reader, None)
-            print(f"Header leído: {header}")
+            headers = next(reader, None)
             
-            total_rows_processed = 0
-            analysis_rows_added = 0
+            aiu_dict = {}
+            analysis_rows = []
+            is_aiu_block = False
 
-            for row_data in reader:
+            for row in reader:
                 total_rows_processed += 1
-                # Saltar si la fila está vacía o es muy corta
-                if not row_data or len(row_data) < 1:
+                if not row:
+                    is_aiu_block = True
                     continue
                 
-                print(f"Procesando fila {total_rows_processed}: {row_data}")
-                
-                # Verificar si es una fila de subtotal (aunque no debería haber)
-                is_subtotal = (
-                    (row_data[0] and 'SUBTOTAL' in row_data[0].upper()) or
-                    (len(row_data) > 1 and row_data[1] and 'SUBTOTAL' in row_data[1].upper())
-                )
-                
-                if is_subtotal:
-                    print("  → Omitiendo subtotal")
-                    continue
-                
-                # Si es una fila de capítulo - detectar formato "N. CAP NOMBRE"
-                # Usar exactamente la misma lógica que funciona en el script de prueba
-                if (row_data[0] and 
-                    'CAP' in row_data[0].upper() and 
-                    len(row_data) >= 5 and 
-                    all(not cell or not cell.strip() for cell in row_data[2:5])):  # Unidad, Cantidad, Costo vacíos
-                    
-                    print(f"  → Detectado como CAPÍTULO: {row_data[0]}")
-                    chapter_text = row_data[0]
+                if is_aiu_block:
+                    key = row[0].strip().upper()
+                    value = row[1].replace('$', '').replace(',', '').strip() if len(row) > 1 else '0'
+                    pct = row[2].replace('%', '').strip() if len(row) > 2 else '0'
                     try:
-                        # Extraer nombre del capítulo - formato "1. CAP 1" -> "CAP 1"
-                        if '.' in chapter_text and 'CAP' in chapter_text.upper():
-                            parts = chapter_text.split('.', 1)
-                            if len(parts) > 1:
-                                name = parts[1].strip()
-                            else:
-                                name = chapter_text
-                        else:
-                            name = chapter_text
-                        self.add_chapter_row(name.strip(), trigger_rebuild=False)
-                    except (ValueError, IndexError):
-                        self.add_chapter_row(chapter_text, trigger_rebuild=False)
+                        val_f = float(value)
+                        pct_f = float(pct)
+                    except ValueError:
+                        val_f = 0.0; pct_f = 0.0
+                    
+                    if key == "COSTO DIRECTO": aiu_dict['direct_cost'] = val_f
+                    elif key == "ADMINISTRACIÓN": aiu_dict['admin'] = val_f; aiu_dict['admin_pct'] = pct_f
+                    elif key == "IMPREVISTOS": aiu_dict['imprev'] = val_f; aiu_dict['imprev_pct'] = pct_f
+                    elif key == "UTILIDAD": aiu_dict['util'] = val_f; aiu_dict['util_pct'] = pct_f
+                    elif key == "IVA UTILIDAD": aiu_dict['iva'] = val_f; aiu_dict['iva_pct'] = pct_f
+                    elif key == "TOTAL COSTOS INDIRECTOS": aiu_dict['total_aiu'] = val_f
+                else:
+                    analysis_rows.append(row)
+
+            for row_data in analysis_rows:
+                # Lógica para añadir capítulos y análisis
+                if (len(row_data) >= 6 and row_data[5].strip().lower() == 'chapter') or ('cap' in row_data[0].lower() and row_data[0][0].isdigit()):
+                    chapter_text = row_data[0]
+                    if '.' in chapter_text: 
+                        chapter_name = chapter_text.split('.',1)[1].strip()
+                    else: 
+                        chapter_name = chapter_text
+                    self.add_chapter_row(chapter_name, trigger_rebuild=False)
                     continue
                 
-                # Si llegamos aquí, es una fila de análisis
-                print(f"  → Procesando como ANÁLISIS")
+                if len(row_data) < 5: 
+                    continue
                 
-                row = self.table.rowCount()
-                self.table.insertRow(row)
-                
-                # El código del análisis está en la columna 5 (índice 5) según el debug
-                analisis_code = row_data[5] if len(row_data) > 5 else None
-
-                # Procesar las primeras 5 columnas (Item, Descripción, Unidad, Cantidad, Costo Unitario)
-                for column in range(5):
-                    data = row_data[column] if column < len(row_data) else ""
-                    item = QTableWidgetItem(str(data) if data else "")
-                    
-                    # Configurar flags según la columna
-                    if column == 3:  # Columna Cantidad - editable
+                row_idx = self.table.rowCount()
+                self.table.insertRow(row_idx)
+                for col in range(5):
+                    val = row_data[col] if col < len(row_data) else ''
+                    item = QTableWidgetItem(val)
+                    if col in (2,3): 
                         item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsEditable)
-                    else:  # Otras columnas - no editables
+                    else: 
                         item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
-                    
-                    # Configurar datos específicos por columna
-                    if column == 0:  # Columna Item
-                        if analisis_code:
-                            item.setData(Qt.ItemDataRole.UserRole, analisis_code)
-                    elif column == 1:  # Columna Descripción
-                        item.setToolTip(str(data) if data else "")
-                    elif column == 3:  # Columna Cantidad
-                        # Asegurar que siempre haya una cantidad válida
-                        try:
-                            cantidad = float(str(data).replace(',', '')) if data else 1.0
-                            item.setText(str(int(cantidad)) if cantidad == int(cantidad) else str(cantidad))
-                        except (ValueError, TypeError):
-                            item.setText('1')
-                    elif column == 4:  # Columna Costo Unitario
-                        try:
-                            if data and str(data).strip():
-                                # Limpiar el dato y convertir
-                                clean_data = str(data).strip().replace('$', '').replace(',', '')
-                                if clean_data:
-                                    value = float(clean_data)
-                                    formatted_cost = f"${value:,.2f}"
-                                    item.setText(formatted_cost)
-                                    print(f"    Costo procesado: '{data}' -> '{formatted_cost}'")
-                                else:
-                                    item.setText("$0.00")
-                                    print(f"    Costo vacío: '{data}' -> '$0.00'")
-                            else:
-                                item.setText("$0.00")
-                                print(f"    Costo nulo: '{data}' -> '$0.00'")
-                        except (ValueError, TypeError) as e:
-                            item.setText("$0.00")
-                            print(f"    Error en costo: '{data}' -> '$0.00' (Error: {e})")
-                    
-                    self.table.setItem(row, column, item)
+                    if col==1: 
+                        item.setToolTip(val)
+                    self.table.setItem(row_idx, col, item)
                 
-                # Crear la celda de Costo Total (columna 5) y calcularla automáticamente
                 total_item = QTableWidgetItem()
-                total_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)  # No editable
-                self.table.setItem(row, 5, total_item)
-                
-                # Calcular el total automáticamente
-                self.update_row_total(row)
+                total_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
+                self.table.setItem(row_idx, 5, total_item)
+                self.update_row_total(row_idx)
                 analysis_rows_added += 1
-                print(f"  → Análisis agregado en fila {row} (análisis #{analysis_rows_added})")
+
+        if aiu_dict:
+            self.aiu_breakdown = aiu_dict
+            self.admin_cost_total = aiu_dict.get('total_aiu', 0.0)
 
         # Reconstruir tabla con subtotales
         print(f"\n=== RESUMEN IMPORTACIÓN ===")
@@ -970,7 +997,7 @@ class PresupuestoView(QWidget):
             
             # Finalmente, actualizar totales y subtotales
             self.update_total_presupuesto()
-            
+                    
         finally:
             self.table.blockSignals(False)
 
@@ -1003,3 +1030,54 @@ class PresupuestoView(QWidget):
                 cu_text = cu.text() if cu else ""
                 ct_text = ct.text() if ct else ""
                 print(f"Fila {row:2d} | Item={item_text!r} | CU={cu_text!r} | CT={ct_text!r}")
+
+    # ---------------- NUEVO MÉTODO: Editar análisis seleccionado ------------------
+    def edit_selected_analysis(self):
+        """Emite la señal de edición de análisis para la fila seleccionada."""
+        selected_items = self.table.selectedItems()
+        if not selected_items:
+            QMessageBox.warning(self, "Sin selección", "Seleccione una fila de análisis para editar.")
+            return
+
+        row = selected_items[0].row()
+        item = self.table.item(row, 0)
+        if not item:
+            QMessageBox.warning(self, "Error", "La fila seleccionada no es válida.")
+            return
+
+        user_role = item.data(Qt.ItemDataRole.UserRole)
+        if user_role in (None, "", "chapter", "subtotal"):
+            QMessageBox.warning(self, "Operación no válida", "Solo se pueden editar filas de análisis (no capítulos ni subtotales).")
+            return
+
+        self.analysis_edit_requested.emit(user_role)
+
+    def open_administracion_window(self):
+        """Abre la ventana para calcular costos administrativos basados en profesionales."""
+        # Obtener los profesionales de la base de datos
+        session = SessionLocal()
+        try:
+            profesionales_db = session.query(Profesional).all()
+            profesionales = [
+                {
+                    'nombre': p.nombre,
+                    'cargo': p.cargo,
+                    'salario_mensual': p.salario_mensual,
+                    'necesario': p.necesario,
+                } for p in profesionales_db
+            ]
+        finally:
+            session.close()
+
+        # Mostrar la vista
+        direct_cost = getattr(self, 'direct_cost_total', 0.0)
+        self.admin_dialog = AdministracionWindow(profesionales, direct_cost, parent=self)
+        self.admin_dialog.aiu_computed.connect(self.on_admin_cost_computed)
+        self.admin_dialog.exec()
+
+    def on_admin_cost_computed(self, data):
+        """Recibe desglose AIU y actualiza totales."""
+        # data dict includes totals
+        self.admin_cost_total = data.get('total_aiu', 0.0)
+        self.aiu_breakdown = data
+        self.update_total_presupuesto()
