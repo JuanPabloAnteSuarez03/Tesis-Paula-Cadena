@@ -28,39 +28,53 @@ PROJ_DIR = os.path.dirname(os.path.abspath(__file__))
 if PROJ_DIR not in sys.path:
     sys.path.insert(0, PROJ_DIR)
 
-from models.update_db import cargar_profesionales_desde_excel, cargar_profesionales_desde_csv  # noqa: E402
+from models.update_db import (
+    cargar_profesionales_desde_excel,
+    cargar_profesionales_desde_csv,
+    limpiar_profesionales_nan,
+)  # noqa: E402
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Importa profesionales desde un archivo Excel a la base de datos"
+        description="Gestión de profesionales: importar o limpiar filas NaN"
     )
-    parser.add_argument(
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    imp = sub.add_parser("import", help="Importa profesionales desde Excel/CSV")
+    imp.add_argument(
         "archivo",
         help="Ruta al archivo .xlsx o .csv que contiene la tabla de profesionales",
     )
-    parser.add_argument(
+    imp.add_argument(
         "--sheet",
         "-s",
         type=int,
         default=0,
         help="Índice de la hoja dentro del Excel (por defecto 0)",
     )
+
+    clean = sub.add_parser("clean", help="Limpia filas 'nan' en la tabla profesionales")
     args = parser.parse_args()
 
-    file_path = args.archivo
-    if not os.path.isfile(file_path):
-        print(f"❌ Archivo no encontrado: {file_path}")
-        sys.exit(1)
+    if args.cmd == "clean":
+        limpiar_profesionales_nan()
+        return
 
-    if file_path.lower().endswith('.csv'):
-        print(f"▶ Cargando profesionales desde CSV '{file_path}' …")
-        cargar_profesionales_desde_csv(file_path)
-    else:
-        print(
-            f"▶ Cargando profesionales desde Excel '{file_path}', hoja {args.sheet} …"
-        )
-        cargar_profesionales_desde_excel(file_path, sheet_name=args.sheet)
+    if args.cmd == "import":
+        file_path = args.archivo
+        if not os.path.isfile(file_path):
+            print(f"❌ Archivo no encontrado: {file_path}")
+            sys.exit(1)
+
+        if file_path.lower().endswith('.csv'):
+            print(f"▶ Cargando profesionales desde CSV '{file_path}' …")
+            cargar_profesionales_desde_csv(file_path)
+        else:
+            print(
+                f"▶ Cargando profesionales desde Excel '{file_path}', hoja {args.sheet} …"
+            )
+            cargar_profesionales_desde_excel(file_path, sheet_name=args.sheet)
 
 
 if __name__ == "__main__":

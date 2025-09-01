@@ -16,8 +16,8 @@ def cargar_datos_recursos_desde_csv(csv_file):
                 print("La tabla ya contiene datos. No se cargará el CSV.")
                 return
             
-            # Cargar el CSV con pandas
-            df = pd.read_csv(csv_file)
+            # Cargar el CSV con pandas, tolerando codificaciones comunes en Windows
+            df = pd.read_csv(csv_file, encoding_errors='ignore', encoding='latin-1')
             
             # Eliminar filas duplicadas basadas en el código
             df = df.drop_duplicates(subset=['Codigo'])
@@ -48,7 +48,7 @@ def cargar_analisis_unitarios(csv_file):
         return
     
     try:
-        df = pd.read_csv(csv_file)
+        df = pd.read_csv(csv_file, encoding_errors='ignore', encoding='latin-1')
         # Opcional: eliminar duplicados
         df.drop_duplicates(subset=['codigo'], inplace=True)
 
@@ -91,7 +91,7 @@ def cargar_relacion_analisis_unitarios_recursos(csv_file):
         return
     
     try:
-        df = pd.read_csv(csv_file)
+        df = pd.read_csv(csv_file, encoding_errors='ignore', encoding='latin-1')
 
         with conn.cursor() as cursor:
             for _, row in df.iterrows():
@@ -180,13 +180,17 @@ def cargar_profesionales_desde_excel(excel_file, sheet_name=0):
         # El archivo no trae columna 'Necesario'; definiremos True hasta que aparezca la fila 'VALOR TOTAL PROFESIONALES'
         necesario_col = None
 
-        # Limpiar filas vacías y detectar sección obligatoria / opcional
+        # Limpiar filas vacías/NaN y detectar sección obligatoria / opcional
         profesionales_rows = []
         mandatory = True
         for _, row in df.iterrows():
-            nombre_raw = str(row.get(nombre_col, "")).strip()
-            if not nombre_raw:
-                continue  # saltar filas vacías
+            nombre_val = row.get(nombre_col, None)
+            # Saltar filas sin nombre o con NaN
+            if nombre_val is None or (isinstance(nombre_val, float) and pd.isna(nombre_val)):
+                continue
+            nombre_raw = str(nombre_val).strip()
+            if not nombre_raw or nombre_raw.lower() in ("nan", "none"):
+                continue
             nombre_low = nombre_raw.lower()
             if 'valor total' in nombre_low:
                 mandatory = False  # Las filas siguientes serán consideradas no obligatorias
@@ -195,9 +199,17 @@ def cargar_profesionales_desde_excel(excel_file, sheet_name=0):
 
         with conn.cursor() as cursor:
             for row, es_mandatorio in profesionales_rows:
-                nombre = str(row.get(nombre_col)).strip()
+                # Nombre
+                nombre_val = row.get(nombre_col)
+                nombre = str(nombre_val).strip() if not pd.isna(nombre_val) else ""
+                if not nombre or nombre.lower() in ("nan", "none"):
+                    continue
+                # Cargo
                 cargo_raw_val = row.get(cargo_col) if cargo_col else nombre
-                cargo = str(cargo_raw_val).strip() if not pd.isna(cargo_raw_val) else nombre
+                if pd.isna(cargo_raw_val):
+                    cargo = nombre
+                else:
+                    cargo = str(cargo_raw_val).strip() or nombre
                 try:
                     salario_str = str(row.get(salario_col)).replace("$", "").replace(".", "").replace(",", ".")
                     salario = float(salario_str)
@@ -261,7 +273,7 @@ def cargar_profesionales_desde_csv(csv_file):
                 if pd.isna(nombre_raw):
                     continue
                 nombre = str(nombre_raw).strip()
-                if not nombre:
+                if not nombre or nombre.lower() in ("nan", "none"):
                     continue
 
                 # Salario
@@ -293,6 +305,32 @@ def cargar_profesionales_desde_csv(csv_file):
         print("✅ Profesionales cargados desde CSV", csv_file)
     except Exception as e:
         print("Error al cargar profesionales desde CSV:", e)
+    finally:
+        conn.close()
+
+def limpiar_profesionales_nan():
+    """
+    Elimina filas con nombre/cargo vacíos o iguales a 'nan' (case-insensitive)
+    y normaliza valores inconsistentes.
+    """
+    conn = get_db_connection()
+    if conn is None:
+        return
+    try:
+        with conn.cursor() as cursor:
+            # Borrar filas inválidas (con trim y variantes)
+            cursor.execute(
+                """
+                DELETE FROM profesionales
+                WHERE lower(trim(coalesce(nombre,''))) IN ('nan','n','')
+                   OR lower(trim(coalesce(cargo,'')))  IN ('nan','n','');
+                """
+            )
+        conn.commit()
+        print("✅ Limpieza de profesionales completada (NaN removidos)")
+    except Exception as e:
+        print("Error al limpiar profesionales:", e)
+        conn.rollback()
     finally:
         conn.close()
 
