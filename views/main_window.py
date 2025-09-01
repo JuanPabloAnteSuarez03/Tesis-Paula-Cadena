@@ -97,6 +97,11 @@ class MainWindow(QMainWindow):
         
         # Cargar controlador de presupuesto inicialmente
         self.presupuesto_controller = PresupuestoController()
+        # Reutilizar el controlador de análisis ya cargado en el panel derecho
+        try:
+            self.presupuesto_controller.set_external_analisis_controller(self.analisis_controller)
+        except Exception:
+            pass
         self.center_panel_layout.addWidget(self.presupuesto_controller.view)
 
     def create_side_panel(self, side):

@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QHeaderView, QPushButton, QLineEdit, QLabel, QMessageBox, QFileDialog,
-    QInputDialog, QApplication
+    QInputDialog, QApplication, QDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
@@ -130,10 +130,83 @@ class PresupuestoView(QWidget):
         self.analisis_controller.view.show()
 
     def on_analisis_selected_from_search(self, codigo):
-        """Maneja la selección de un análisis desde la ventana de búsqueda."""
-        self.analisis_selected.emit(codigo)
+        """Oculta la ventana de búsqueda tras seleccionar (la inserción la maneja MainWindow)."""
         if self.analisis_controller:
             self.analisis_controller.view.hide()
+
+    def open_insert_item_dialog(self):
+        """Abre un diálogo reutilizando la vista de análisis ya cargada (sin recargar datos)."""
+        # Si ya tenemos el controlador inyectado, reusamos su vista moviéndola temporalmente al diálogo
+        if getattr(self, 'analisis_controller', None):
+            view = self.analisis_controller.view
+            original_parent = view.parent()
+            original_layout = original_parent.layout() if original_parent else None
+
+            # Quitar del layout original para reparentar
+            try:
+                if original_layout is not None:
+                    original_layout.removeWidget(view)
+            except Exception:
+                pass
+
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Insertar Ítem - Análisis Unitarios")
+            dialog.resize(900, 600)
+            dlayout = QVBoxLayout(dialog)
+            dlayout.addWidget(view)
+
+            # No conectar señales adicionales: la app principal ya maneja la inserción
+
+            dialog.exec()
+
+            # Restaurar vista al contenedor original
+            try:
+                dlayout.removeWidget(view)
+            except Exception:
+                pass
+            view.setParent(original_parent)
+            if original_layout is not None:
+                original_layout.addWidget(view)
+            # Nota: no desconectamos _on_select para permitir futuras inserciones rápidas
+            return
+
+        # Fallback: si no hay analisis_controller, crear uno (primer uso) y mostrarlo en diálogo
+        from controllers.analisis_unitarios_controller import AnalisisUnitariosController
+        self.analisis_controller = AnalisisUnitariosController()
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Insertar Ítem - Análisis Unitarios")
+        dialog.resize(900, 600)
+        dlayout = QVBoxLayout(dialog)
+        dlayout.addWidget(self.analisis_controller.view)
+        self.analisis_controller.view.analysis_selected.connect(self.on_analisis_selected_from_search)
+        dialog.exec()
+
+    def edit_selected_item_description(self):
+        """Permite editar la descripción de la fila seleccionada del presupuesto."""
+        selected_items = self.table.selectedItems()
+        if not selected_items:
+            QMessageBox.warning(self, "Sin selección", "Seleccione una fila de análisis para modificar su descripción.")
+            return
+        row = selected_items[0].row()
+        code_item = self.table.item(row, 0)
+        if not code_item:
+            QMessageBox.warning(self, "Error", "La fila seleccionada no es válida.")
+            return
+        user_role = code_item.data(Qt.ItemDataRole.UserRole)
+        if user_role in (None, "", "chapter", "subtotal"):
+            QMessageBox.warning(self, "Operación no válida", "Solo se pueden modificar descripciones de filas de análisis (no capítulos ni subtotales).")
+            return
+
+        desc_item = self.table.item(row, 1)
+        current_desc = desc_item.text() if desc_item else ""
+        new_desc, ok = QInputDialog.getText(self, "Modificar Descripción", "Nueva descripción:", text=current_desc)
+        if ok and new_desc.strip():
+            if not desc_item:
+                desc_item = QTableWidgetItem()
+                self.table.setItem(row, 1, desc_item)
+            desc_item.setText(new_desc.strip())
+            desc_item.setToolTip(new_desc.strip())
+            self.update_total_presupuesto()
 
     def create_buttons(self):
         """Crea los botones para importar/exportar CSV y capítulos."""
@@ -143,15 +216,19 @@ class PresupuestoView(QWidget):
         self.add_chapter_button = QPushButton("Agregar Capítulo")
         self.edit_chapter_button = QPushButton("Editar Capítulo")
         self.delete_chapter_button = QPushButton("Eliminar Capítulo")
+        self.edit_item_desc_button = QPushButton("Modificar Descripción")
         self.edit_analysis_button = QPushButton("Editar Análisis")
         self.import_button = QPushButton("Importar CSV")
         self.export_button = QPushButton("Exportar CSV")
-        self.delete_row_button = QPushButton("Eliminar Fila")
+        self.insert_item_button = QPushButton("Insertar Ítem")
+        self.delete_row_button = QPushButton("Eliminar Item")
         self.aiu_button = QPushButton("AIU Profesionales")
         
         self.add_chapter_button.clicked.connect(self.prompt_add_chapter)
         self.edit_chapter_button.clicked.connect(self.prompt_edit_chapter)
         self.delete_chapter_button.clicked.connect(self.prompt_delete_chapter)
+        self.insert_item_button.clicked.connect(self.open_insert_item_dialog)
+        self.edit_item_desc_button.clicked.connect(self.edit_selected_item_description)
         self.edit_analysis_button.clicked.connect(self.edit_selected_analysis)
         self.import_button.clicked.connect(self.import_csv)
         self.export_button.clicked.connect(self.export_csv)
@@ -161,9 +238,11 @@ class PresupuestoView(QWidget):
         button_layout.addWidget(self.add_chapter_button)
         button_layout.addWidget(self.edit_chapter_button)
         button_layout.addWidget(self.delete_chapter_button)
+        button_layout.addWidget(self.edit_item_desc_button)
         button_layout.addWidget(self.edit_analysis_button)
         button_layout.addWidget(self.import_button)
         button_layout.addWidget(self.export_button)
+        button_layout.addWidget(self.insert_item_button)
         button_layout.addWidget(self.delete_row_button)
         button_layout.addWidget(self.aiu_button)
         button_layout.addStretch(1)
@@ -344,7 +423,7 @@ class PresupuestoView(QWidget):
                 QMessageBox.warning(
                     self, 
                     "Operación no permitida", 
-                    "No se puede eliminar un capítulo usando 'Eliminar Fila'.\n\n"
+                    "No se puede eliminar un capítulo usando 'Eliminar Item'.\n\n"
                     "Use el botón 'Eliminar Capítulo' para eliminar capítulos completos."
                 )
                 return
@@ -694,6 +773,7 @@ class PresupuestoView(QWidget):
             grand_total = total_presupuesto + admin_total
 
             if admin_total > 0:
+                # Mostrar resumen compacto: Costo directo, Indirecto (AIU) y Total
                 text = (
                     f"Costo Directo: ${total_presupuesto:,.2f}   "
                     f"AIU: ${admin_total:,.2f}   "

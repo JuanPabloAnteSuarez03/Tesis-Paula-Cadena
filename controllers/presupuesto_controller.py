@@ -10,6 +10,7 @@ class PresupuestoController(QObject):
         super().__init__(parent)
         self.view = PresupuestoView()
         self.recursos_controller = None  # Para mantener una referencia
+        self.external_analisis_controller = None
         # Conexiones
         self.view.analisis_selected.connect(self.on_analisis_selected)
         self.view.analysis_edit_requested.connect(self.on_edit_analysis_in_presupuesto)
@@ -18,6 +19,15 @@ class PresupuestoController(QObject):
     def show(self):
         """Muestra la ventana de presupuestos."""
         self.view.show()
+
+    def set_external_analisis_controller(self, analisis_controller):
+        """Inyecta un AnalisisUnitariosController ya existente para reutilizarlo."""
+        self.external_analisis_controller = analisis_controller
+        # Exponerlo a la vista para que lo use en el diálogo de insertar ítem y búsqueda
+        try:
+            self.view.analisis_controller = analisis_controller
+        except Exception:
+            pass
 
     def agregar_analisis(self, analisis_data):
         """

@@ -19,7 +19,7 @@ def probar_conexion_postgres():
     # Reemplaza con la cadena real del cliente
     DB_NAME = "app_presupuestos"
     DB_USER = "postgres"
-    DB_PASSWORD = "Diego"
+    DB_PASSWORD = "123Randy"
     DB_HOST = "localhost"
     DB_PORT = "5432"
 
