@@ -15,11 +15,15 @@ class AdministracionWindow(QDialog):
     def __init__(self, profesionales: list[dict], costo_directo: float, parent: QWidget | None = None):
         super().__init__(parent)
         self.setWindowTitle("Costos Indirectos (AIU)")
-        self.resize(1100, 700)
+        self.resize(1400, 900)
+        # Forzar pantalla completa/maximizado según plataforma
         try:
-            self.setWindowState(self.windowState() | Qt.WindowState.WindowMaximized)
+            self.showMaximized()
         except Exception:
-            pass
+            try:
+                self.setWindowState(self.windowState() | Qt.WindowState.WindowMaximized)
+            except Exception:
+                pass
         self.profesionales = profesionales
         self.costo_directo = costo_directo
         self._build_ui()
@@ -46,49 +50,151 @@ class AdministracionWindow(QDialog):
         layout.addWidget(self.table)
 
         # Subgastos administrativos en múltiples subtablas
-        from PyQt6.QtWidgets import QGroupBox, QGridLayout
+        from PyQt6.QtWidgets import QGroupBox, QGridLayout, QLabel, QSpacerItem, QSizePolicy, QSplitter
         sub_box = QGroupBox("Gastos Administrativos (Subgastos)")
         sub_layout = QGridLayout(sub_box)
 
-        # Oficina / Papelería / Otros (porcentaje sobre costo directo)
+        # Oficina / Papelería / Otros
         self.tbl_oficina = QTableWidget()
-        self.tbl_oficina.setColumnCount(4)
-        self.tbl_oficina.setHorizontalHeaderLabels(["Concepto", "Valor Base", "% Dedic.", "Valor"]) 
+        self.tbl_oficina.setColumnCount(5)
+        self.tbl_oficina.setHorizontalHeaderLabels(["Concepto", "Valor Base", "% Dedic.", "Meses", "Valor"]) 
         oh = self.tbl_oficina.horizontalHeader()
         oh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         oh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         oh.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         oh.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        sub_layout.addWidget(QLabel("Oficina / Papelería / Otros"), 0, 0)
-        sub_layout.addWidget(self.tbl_oficina, 1, 0)
+        oh.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        # Encabezado Oficina con botón Agregar
+        header_of = QWidget()
+        hl_of = QHBoxLayout(header_of)
+        hl_of.setContentsMargins(0,0,0,0)
+        hl_of.addWidget(QLabel("Oficina / Papelería / Otros"))
+        self.btn_add_oficina = QPushButton("Agregar")
+        self.btn_add_oficina.setFixedWidth(90)
+        hl_of.addStretch(1)
+        hl_of.addWidget(self.btn_add_oficina)
+        sub_layout.addWidget(header_of, 0, 0)
+        # Splitter horizontal para ajustar Oficina vs Pólizas
+        split_hp = QSplitter(Qt.Orientation.Horizontal)
+        self.tbl_oficina.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # Contenedor vertical para tabla y botones de Oficina
+        of_container = QWidget()
+        of_v = QVBoxLayout(of_container)
+        of_v.setContentsMargins(0,0,0,0)
+        of_v.addWidget(self.tbl_oficina)
+        of_btns = QHBoxLayout()
+        of_btns.addStretch(1)
+        self.btn_add_oficina_b = QPushButton("Agregar")
+        self.btn_del_oficina_b = QPushButton("Eliminar")
+        of_btns.addWidget(self.btn_add_oficina_b)
+        of_btns.addWidget(self.btn_del_oficina_b)
+        of_v.addLayout(of_btns)
+        split_hp.addWidget(of_container)
+        # Pólizas se añade más abajo, tras crearla
+        self.lbl_subtotal_oficina = QLabel("Subtotal: $0.00")
+        self.lbl_subtotal_oficina.setStyleSheet("font-weight: bold; padding: 16px 0 40px 0;")
+        sub_layout.addWidget(self.lbl_subtotal_oficina, 2, 0)
 
         # Pólizas (porcentaje sobre base de contrato por defecto)
         self.tbl_polizas = QTableWidget()
-        self.tbl_polizas.setColumnCount(4)
-        self.tbl_polizas.setHorizontalHeaderLabels(["Concepto", "Valor Base", "% Dedic.", "Valor"])
+        self.tbl_polizas.setColumnCount(7)
+        self.tbl_polizas.setHorizontalHeaderLabels(["Concepto", "% Req.", "Meses", "% Prima", "Valor Base", "% Dedic.", "Valor"])
         ph = self.tbl_polizas.horizontalHeader()
         ph.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         ph.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         ph.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         ph.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         ph.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        sub_layout.addWidget(QLabel("Legalización del Contrato (Pólizas)"), 0, 1)
-        sub_layout.addWidget(self.tbl_polizas, 1, 1)
+        ph.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        ph.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        ph.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        # Encabezado Pólizas con botón Agregar
+        header_pol = QWidget()
+        hl_pol = QHBoxLayout(header_pol)
+        hl_pol.setContentsMargins(0,0,0,0)
+        hl_pol.addWidget(QLabel("Legalización del Contrato (Pólizas)"))
+        self.btn_add_poliza = QPushButton("Agregar")
+        self.btn_add_poliza.setFixedWidth(90)
+        hl_pol.addStretch(1)
+        hl_pol.addWidget(self.btn_add_poliza)
+        sub_layout.addWidget(header_pol, 0, 1)
+        self.tbl_polizas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # Contenedor vertical para tabla y botones de Polizas
+        pol_container = QWidget()
+        pol_v = QVBoxLayout(pol_container)
+        pol_v.setContentsMargins(0,0,0,0)
+        pol_v.addWidget(self.tbl_polizas)
+        pol_btns = QHBoxLayout()
+        pol_btns.addStretch(1)
+        self.btn_add_poliza_b = QPushButton("Agregar")
+        self.btn_del_poliza_b = QPushButton("Eliminar")
+        pol_btns.addWidget(self.btn_add_poliza_b)
+        pol_btns.addWidget(self.btn_del_poliza_b)
+        pol_v.addLayout(pol_btns)
+        split_hp.addWidget(pol_container)
+        split_hp.setStretchFactor(0, 1)
+        split_hp.setStretchFactor(1, 1)
+        sub_layout.addWidget(split_hp, 1, 0, 1, 2)
+        self.lbl_subtotal_polizas = QLabel("Subtotal: $0.00")
+        self.lbl_subtotal_polizas.setStyleSheet("font-weight: bold; padding: 4px 0 10px 0;")
+        sub_layout.addWidget(self.lbl_subtotal_polizas, 2, 1)
 
         # Estampillas (porcentaje sobre base de contrato)
         self.tbl_estamp = QTableWidget()
-        self.tbl_estamp.setColumnCount(4)
-        self.tbl_estamp.setHorizontalHeaderLabels(["Concepto", "Valor Base", "% Dedic.", "Valor"])
+        self.tbl_estamp.setColumnCount(3)
+        self.tbl_estamp.setHorizontalHeaderLabels(["Concepto", "% Tasa", "Valor"])
         eh = self.tbl_estamp.horizontalHeader()
         eh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         eh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         eh.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        eh.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         eh.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        sub_layout.addWidget(QLabel("Estampillas"), 2, 0, 1, 2)
-        sub_layout.addWidget(self.tbl_estamp, 3, 0, 1, 2)
+        # Encabezado Estampillas con botón Agregar
+        header_est = QWidget()
+        hl_est = QHBoxLayout(header_est)
+        hl_est.setContentsMargins(0,0,0,0)
+        hl_est.addWidget(QLabel("Estampillas"))
+        self.btn_add_estamp = QPushButton("Agregar")
+        self.btn_add_estamp.setFixedWidth(90)
+        hl_est.addStretch(1)
+        hl_est.addWidget(self.btn_add_estamp)
+        sub_layout.addWidget(header_est, 2, 0, 1, 2)
+        # Contenedor vertical para Estampillas y sus botones
+        est_container = QWidget()
+        est_v = QVBoxLayout(est_container)
+        est_v.setContentsMargins(0,0,0,0)
+        est_v.addWidget(self.tbl_estamp)
+        est_btns = QHBoxLayout()
+        est_btns.addStretch(1)
+        self.btn_add_estamp_b = QPushButton("Agregar")
+        self.btn_del_estamp_b = QPushButton("Eliminar")
+        est_btns.addWidget(self.btn_add_estamp_b)
+        est_btns.addWidget(self.btn_del_estamp_b)
+        est_v.addLayout(est_btns)
+        sub_layout.addWidget(est_container, 3, 0, 1, 2)
+        self.lbl_subtotal_estamp = QLabel("Subtotal: $0.00")
+        self.lbl_subtotal_estamp.setStyleSheet("font-weight: bold; padding: 4px 0 10px 0;")
+        sub_layout.addWidget(self.lbl_subtotal_estamp, 4, 0, 1, 2)
+        # Espaciador inferior para evitar solapamiento con el siguiente bloque
+        sub_layout.setContentsMargins(8, 8, 8, 24)
+        sub_layout.addItem(QSpacerItem(20, 28, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed), 5, 0, 1, 2)
+        # Hacer que las filas con tablas se estiren mejor
+        sub_layout.setRowStretch(1, 1)
+        sub_layout.setRowStretch(3, 1)
+        sub_layout.setColumnStretch(0, 1)
+        sub_layout.setColumnStretch(1, 1)
 
         layout.addWidget(sub_box)
+        # Conexiones de botones inferiores
+        self.btn_add_oficina_b.clicked.connect(self._on_add_oficina)
+        self.btn_del_oficina_b.clicked.connect(self._on_del_oficina)
+        self.btn_add_poliza_b.clicked.connect(self._on_add_poliza)
+        self.btn_del_poliza_b.clicked.connect(self._on_del_poliza)
+        self.btn_add_estamp_b.clicked.connect(self._on_add_estamp)
+        self.btn_del_estamp_b.clicked.connect(self._on_del_estamp)
+        # Conexiones de botones agregar
+        self.btn_add_oficina.clicked.connect(self._on_add_oficina)
+        self.btn_add_poliza.clicked.connect(self._on_add_poliza)
+        self.btn_add_estamp.clicked.connect(self._on_add_estamp)
 
         # Percentages form
         form_widget = QWidget()
@@ -125,6 +231,13 @@ class AdministracionWindow(QDialog):
         form_layout.addRow("Imprevistos", self.imprev_spin)
         form_layout.addRow("Utilidad", self.util_spin)
         form_layout.addRow("IVA sobre Utilidad", self.iva_spin)
+        # Duración global del proyecto
+        self.meses_global_spin = QDoubleSpinBox()
+        self.meses_global_spin.setSuffix(" meses")
+        self.meses_global_spin.setRange(0, 120)
+        self.meses_global_spin.setValue(6.0)
+        self.meses_global_spin.setSingleStep(0.5)
+        form_layout.addRow("Duración del proyecto", self.meses_global_spin)
         # Ya no mostramos spinners individuales, se controlan desde subtablas
         layout.addWidget(form_widget)
 
@@ -180,6 +293,7 @@ class AdministracionWindow(QDialog):
         self.imprev_spin.valueChanged.connect(self._recalculate)
         self.util_spin.valueChanged.connect(self._recalculate)
         self.iva_spin.valueChanged.connect(self._recalculate)
+        self.meses_global_spin.valueChanged.connect(self._on_global_months_changed)
         # spinners individuales eliminados
 
     # ---------- Data ----------
@@ -192,6 +306,11 @@ class AdministracionWindow(QDialog):
 
         # Cargar subgastos por defecto (sin autoajustar aún)
         self._load_subgastos()
+        # Inicializar meses de tablas dependientes con la duración global
+        try:
+            self._on_global_months_changed(None)
+        except Exception:
+            pass
 
     def _add_row(self, prof):
         row = self.table.rowCount()
@@ -208,13 +327,20 @@ class AdministracionWindow(QDialog):
         salario = float(prof.get("salario_mensual", 0.0))
         salario_item = QTableWidgetItem(f"${salario:,.2f}")
         salario_item.setFlags(salario_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        # Guardar salario base para autoajuste idempotente
+        try:
+            salario_item.setData(Qt.ItemDataRole.UserRole, salario)
+        except Exception:
+            pass
         self.table.setItem(row, 2, salario_item)
-        # % dedicación
-        dedic_default = 100.0 if prof.get("necesario", False) else 0.0
+        # % dedicación por defecto: Director 50%, resto 100%
+        cargo_low = str(prof.get("cargo", "")).lower()
+        nombre_low = str(prof.get("nombre", "")).lower()
+        dedic_default = 50.0 if ("director" in cargo_low or "director" in nombre_low) else 100.0
         dedic_item = QTableWidgetItem(str(dedic_default))
         self.table.setItem(row, 3, dedic_item)
-        # Meses
-        meses_item = QTableWidgetItem("1")
+        # Meses (se sincroniza luego con duración global)
+        meses_item = QTableWidgetItem("6")
         self.table.setItem(row, 4, meses_item)
         # Total
         total_item = QTableWidgetItem("$0.00")
@@ -222,62 +348,69 @@ class AdministracionWindow(QDialog):
         self.table.setItem(row, 5, total_item)
 
     def _load_subgastos(self):
-        """Carga filas base de subgastos en cada subtabla."""
-        # Valores base de referencia
-        oficina = [
-            ("Costo oficina", 2000.00),
-            ("Papelería / Fotocopias / Otros", 1000.00),
+        """Carga filas base de subgastos en cada subtabla (inspirados en ejemplo)."""
+        oficina_mensual = [
+            ("Costo oficina", 300000.0),
+            ("Papelería / Fotocopias / Otros", 100000.0),
         ]
         self.tbl_oficina.setRowCount(0)
-        for nombre, valor in oficina:
+        for nombre, valor_mensual in oficina_mensual:
             r = self.tbl_oficina.rowCount()
             self.tbl_oficina.insertRow(r)
             self.tbl_oficina.setItem(r, 0, QTableWidgetItem(nombre))
-            self.tbl_oficina.setItem(r, 1, QTableWidgetItem(f"${valor:,.2f}"))
-            # % dedicación editable
-            self.tbl_oficina.setItem(r, 2, QTableWidgetItem("0.00"))
-            v = QTableWidgetItem("$0.00")  # editable para ajuste manual
-            self.tbl_oficina.setItem(r, 3, v)
+            self.tbl_oficina.setItem(r, 1, QTableWidgetItem(f"${valor_mensual:,.2f}"))
+            # % dedicación editable (por defecto 100%)
+            self.tbl_oficina.setItem(r, 2, QTableWidgetItem("100.00"))
+            # Meses editable (por defecto 6.00)
+            self.tbl_oficina.setItem(r, 3, QTableWidgetItem("6.00"))
+            v = QTableWidgetItem("$0.00")
+            self.tbl_oficina.setItem(r, 4, v)
 
-        polizas = [
-            ("Póliza de Cumplimiento", 500.00),
-            ("Póliza de Anticipo", 500.00),
-            ("Póliza RC Extracontractual", 500.00),
-            ("Póliza de Estabilidad", 720.00),
-            ("Calidad del Servicio", 1450.00),
-            ("Calidad y Correcto Funcionamiento", 1500.00),
-            ("Póliza Salarios y P.S.", 1000.00),
+        # Aproximación de base de contrato (para inicializar valores base)
+        contrato_estimado = self.costo_directo
+        # Valores por defecto inspirados en tu planilla: % requerido, meses, % prima
+        polizas_params = [
+            ("Póliza de Cumplimiento", 20.0, 10.0, 0.50),
+            ("Póliza de Anticipo", 100.0, 10.0, 0.50),
+            ("Póliza RC Extracontractual", 30.0, 10.0, 0.50),
+            ("Póliza de Estabilidad", 20.0, 5.0, 0.50),
+            ("Calidad del Servicio", 20.0, 10.0, 0.50),
+            ("Calidad y Correcto Funcionamiento", 20.0, 10.0, 0.50),
+            ("Póliza Salarios y P.S.", 5.0, 10.0, 1.00),
         ]
         self.tbl_polizas.setRowCount(0)
-        for nombre, valor in polizas:
+        for nombre, req, meses, prima in polizas_params:
             r = self.tbl_polizas.rowCount()
             self.tbl_polizas.insertRow(r)
             self.tbl_polizas.setItem(r, 0, QTableWidgetItem(nombre))
-            self.tbl_polizas.setItem(r, 1, QTableWidgetItem(f"${valor:,.2f}"))
-            self.tbl_polizas.setItem(r, 2, QTableWidgetItem("0.00"))  # % dedicación
+            self.tbl_polizas.setItem(r, 1, QTableWidgetItem(f"{req:.2f}"))
+            self.tbl_polizas.setItem(r, 2, QTableWidgetItem(f"{meses:.2f}"))
+            self.tbl_polizas.setItem(r, 3, QTableWidgetItem(f"{prima:.3f}"))
+            # Valor base calculado abajo en _recalculate; inicializamos placeholders
+            self.tbl_polizas.setItem(r, 4, QTableWidgetItem("$0.00"))
+            self.tbl_polizas.setItem(r, 5, QTableWidgetItem("100.00"))  # % dedicación
             v = QTableWidgetItem("$0.00")
-            self.tbl_polizas.setItem(r, 3, v)
+            self.tbl_polizas.setItem(r, 6, v)
 
-        estamp = [
-            ("Estampilla pro Desarrollo", 740.00),
-            ("Estampilla pro Univalle", 370.00),
-            ("Estampilla pro Hospital", 740.00),
-            ("Estampilla pro Cultura", 520.00),
-            ("Estampilla pro Pacífico", 740.00),
-            ("Estampilla pro Deporte", 740.00),
-            ("Estampilla pro Adulto Mayor", 740.00),
-            ("Estampilla Familiar", 740.00),
-            ("Contribución Especial", 1850.00),
+        estamp_rates = [
+            ("Estampilla pro Desarrollo", 0.04),
+            ("Estampilla pro Univalle", 0.01),
+            ("Estampilla pro Hospital", 0.01),
+            ("Estampilla pro Cultura", 0.01),
+            ("Estampilla pro Pacífico", 0.01),
+            ("Estampilla pro Deporte", 0.02),
+            ("Estampilla pro Adulto Mayor", 0.02),
+            ("Estampilla Familiar", 0.02),
+            ("Contribución Especial", 0.05),
         ]
         self.tbl_estamp.setRowCount(0)
-        for nombre, valor in estamp:
+        for nombre, rate in estamp_rates:
             r = self.tbl_estamp.rowCount()
             self.tbl_estamp.insertRow(r)
             self.tbl_estamp.setItem(r, 0, QTableWidgetItem(nombre))
-            self.tbl_estamp.setItem(r, 1, QTableWidgetItem(f"${valor:,.2f}"))
-            self.tbl_estamp.setItem(r, 2, QTableWidgetItem("0.00"))  # % dedicación
+            self.tbl_estamp.setItem(r, 1, QTableWidgetItem(f"{rate*100:.2f}"))
             v = QTableWidgetItem("$0.00")
-            self.tbl_estamp.setItem(r, 3, v)
+            self.tbl_estamp.setItem(r, 2, v)
 
     # ---------- Logic ----------
     def _recalculate(self):
@@ -322,53 +455,103 @@ class AdministracionWindow(QDialog):
 
         # Subgastos por subtabla
         sub_total = 0.0
-        # Oficina: valor_base * % dedicación
+        sub_oficina_total = 0.0
+        sub_polizas_total = 0.0
+        sub_estamp_total = 0.0
+        # Oficina: (valor_mensual * meses) * % dedicación
         for r in range(self.tbl_oficina.rowCount()):
-            base_txt = self.tbl_oficina.item(r,1).text() if self.tbl_oficina.item(r,1) else '$0'
-            base = self._parse_money(base_txt)
+            # saltar fila de subtotal si existe
+            first = self.tbl_oficina.item(r,0)
+            if first and first.text().strip().lower() == 'subtotal':
+                continue
+            base_mensual_txt = self.tbl_oficina.item(r,1).text() if self.tbl_oficina.item(r,1) else '$0'
+            base_mensual = self._parse_money(base_mensual_txt)
+            try:
+                meses = float((self.tbl_oficina.item(r,3).text() or '0').replace(',','').strip())
+            except Exception:
+                meses = 0.0
             try:
                 dedic_pct = float((self.tbl_oficina.item(r,2).text() or '0').replace('%','').strip())
             except Exception:
                 dedic_pct = 0.0
-            value = base * (dedic_pct/100.0)
-            vitem = self.tbl_oficina.item(r,3)
+            value = base_mensual * meses * (dedic_pct/100.0)
+            vitem = self.tbl_oficina.item(r,4)
             if vitem is None:
                 vitem = QTableWidgetItem()
-                self.tbl_oficina.setItem(r,3,vitem)
+                self.tbl_oficina.setItem(r,4,vitem)
             vitem.setText(f"${value:,.2f}")
+            sub_oficina_total += value
             sub_total += value
 
         # Base contrato aproximada = costo directo + admin_total parcial (solo profesionales)
         contrato_base = self.costo_directo + admin_total
-        # Pólizas: valor_base * % dedicación
+        # Pólizas: costo_directo × (%Req/100) × (%Prima/100) × (Meses/12) × %Dedic
         for r in range(self.tbl_polizas.rowCount()):
-            base = self._parse_money(self.tbl_polizas.item(r,1).text() if self.tbl_polizas.item(r,1) else '$0')
+            first = self.tbl_polizas.item(r,0)
+            if first and first.text().strip().lower() == 'subtotal':
+                continue
             try:
-                dedic = float((self.tbl_polizas.item(r,2).text() or '0').replace('%','').strip())
+                req = float((self.tbl_polizas.item(r,1).text() or '0').replace('%','').strip())
+            except Exception:
+                req = 0.0
+            try:
+                meses = float((self.tbl_polizas.item(r,2).text() or '0').strip())
+            except Exception:
+                meses = 0.0
+            try:
+                prima = float((self.tbl_polizas.item(r,3).text() or '0').replace('%','').strip())
+            except Exception:
+                prima = 0.0
+            base_val = self.costo_directo * (req/100.0) * (prima/100.0) * (meses/12.0)
+            base_item = self.tbl_polizas.item(r,4)
+            if base_item is None:
+                self.tbl_polizas.setItem(r,4, QTableWidgetItem())
+                base_item = self.tbl_polizas.item(r,4)
+            base_item.setText(f"${base_val:,.2f}")
+            try:
+                dedic = float((self.tbl_polizas.item(r,5).text() or '0').replace('%','').strip())
             except Exception:
                 dedic = 0.0
-            value = base * (dedic/100.0)
-            vitem = self.tbl_polizas.item(r,3)
+            value = base_val * (dedic/100.0)
+            vitem = self.tbl_polizas.item(r,6)
             if vitem is None:
                 vitem = QTableWidgetItem()
-                self.tbl_polizas.setItem(r,3,vitem)
+                self.tbl_polizas.setItem(r,6,vitem)
             vitem.setText(f"${value:,.2f}")
+            sub_polizas_total += value
             sub_total += value
 
-        # Estampillas: valor_base * % dedicación
+        # Estampillas: costo_directo × tasa
         for r in range(self.tbl_estamp.rowCount()):
-            base = self._parse_money(self.tbl_estamp.item(r,1).text() if self.tbl_estamp.item(r,1) else '$0')
+            first = self.tbl_estamp.item(r,0)
+            if first and first.text().strip().lower() == 'subtotal':
+                continue
             try:
-                dedic = float((self.tbl_estamp.item(r,2).text() or '0').replace('%','').strip())
+                tasa = float((self.tbl_estamp.item(r,1).text() or '0').replace('%','').strip())
             except Exception:
-                dedic = 0.0
-            value = base * (dedic/100.0)
-            vitem = self.tbl_estamp.item(r,3)
+                tasa = 0.0
+            value = self.costo_directo * (tasa/100.0)
+            vitem = self.tbl_estamp.item(r,2)
             if vitem is None:
                 vitem = QTableWidgetItem()
-                self.tbl_estamp.setItem(r,3,vitem)
+                self.tbl_estamp.setItem(r,2,vitem)
             vitem.setText(f"${value:,.2f}")
+            sub_estamp_total += value
             sub_total += value
+
+        # Actualizar labels de subtotal (no se insertan filas en tablas)
+        try:
+            self.lbl_subtotal_oficina.setText(f"Subtotal: ${sub_oficina_total:,.2f}")
+        except Exception:
+            pass
+        try:
+            self.lbl_subtotal_polizas.setText(f"Subtotal: ${sub_polizas_total:,.2f}")
+        except Exception:
+            pass
+        try:
+            self.lbl_subtotal_estamp.setText(f"Subtotal: ${sub_estamp_total:,.2f}")
+        except Exception:
+            pass
 
         imp_pct = self.imprev_spin.value()
         util_pct = self.util_spin.value()
@@ -389,11 +572,14 @@ class AdministracionWindow(QDialog):
             polizas_total = 0.0
             estamp_total = 0.0
 
-        total_aiu = admin_total + (sub_total if (self.tbl_oficina.rowCount()+self.tbl_polizas.rowCount()+self.tbl_estamp.rowCount())>0 else (office_total + polizas_total + estamp_total)) + imprev_total + util_total + iva_total
+        # Total AIU = Administración (profesionales) + Subgastos + Imprevistos + Utilidad + IVA
+        total_aiu = admin_total + sub_total + imprev_total + util_total + iva_total
 
-        # Actualizar etiquetas
-        self.tot_admin_lbl.setText(f"Administración: ${admin_total:,.2f}")
-        self.tot_office_lbl.setText(f"Subgastos Administración: ${sub_total:,.2f}")
+        # Actualizar etiquetas: Administración = Profesionales + Subgastos
+        admin_combined = admin_total + sub_total
+        self.tot_admin_lbl.setText(f"Administración: ${admin_combined:,.2f}")
+        # Ocultar línea separada de subgastos en breakdown
+        self.tot_office_lbl.setText("")
         self.tot_polizas_lbl.setText("")
         self.tot_estamp_lbl.setText("")
         self.tot_imprev_lbl.setText(f"Imprevistos ({imp_pct:.2f}%): ${imprev_total:,.2f}")
@@ -401,7 +587,8 @@ class AdministracionWindow(QDialog):
         self.tot_iva_lbl.setText(f"IVA Utilidad ({iva_pct:.2f}%): ${iva_total:,.2f}")
         self.tot_aiu_lbl.setText(f"Total Costos Indirectos: ${total_aiu:,.2f}")
 
-        self._admin_total = admin_total
+        # Guardar administración combinada (para enviar al presupuesto)
+        self._admin_total = admin_combined
         self._imprev_total = imprev_total
         self._util_total = util_total
         self._iva_total = iva_total
@@ -419,6 +606,34 @@ class AdministracionWindow(QDialog):
             except Exception:
                 pass
 
+    def _set_subtotal_row(self, table, label, value_col_idx, total_value):
+        """Crea/actualiza la última fila como subtotal en la tabla dada."""
+        # Buscar si ya existe fila con 'Subtotal'
+        subtotal_row = None
+        for r in range(table.rowCount()):
+            it = table.item(r,0)
+            if it and it.text().strip().lower() == 'subtotal':
+                subtotal_row = r
+                break
+        if subtotal_row is None:
+            subtotal_row = table.rowCount()
+            table.insertRow(subtotal_row)
+            # Crear celdas vacías
+            for c in range(table.columnCount()):
+                if table.item(subtotal_row, c) is None:
+                    table.setItem(subtotal_row, c, QTableWidgetItem())
+        # Escribir etiqueta y valor
+        label_item = table.item(subtotal_row, 0)
+        label_item.setText(label)
+        # Estilo no editable
+        label_item.setFlags(label_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        val_item = table.item(subtotal_row, value_col_idx)
+        if val_item is None:
+            val_item = QTableWidgetItem()
+            table.setItem(subtotal_row, value_col_idx, val_item)
+        val_item.setText(f"${total_value:,.2f}")
+        val_item.setFlags(val_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+
     # ---------- Handlers manual edit (subtablas) ----------
     def _parse_money(self, text: str) -> float:
         try:
@@ -427,66 +642,85 @@ class AdministracionWindow(QDialog):
             return 0.0
 
     def _on_oficina_changed(self, item):
-        # Col 3 Valor editable -> recalcular % util; Col 2 % util -> recalcular Valor
+        # Col 4 Valor editable -> recalcular % dedic.; Col 2 % dedic. o col 3 meses -> recalcular Valor
         row = item.row(); col = item.column()
         self.tbl_oficina.blockSignals(True)
         try:
-            if col == 3:  # Valor
+            base_mensual = self._parse_money(self.tbl_oficina.item(row,1).text() if self.tbl_oficina.item(row,1) else '$0')
+            try:
+                meses = float((self.tbl_oficina.item(row,3).text() or '0').replace(',','').strip())
+            except Exception:
+                meses = 0.0
+            if col == 4:  # Valor
                 val = self._parse_money(item.text())
-                try:
-                    ref_pct = float((self.tbl_oficina.item(row,1).text() or '0').replace('%','').strip())
-                except Exception:
-                    ref_pct = 0.0
-                util = (val / (self.costo_directo * (ref_pct/100.0) + 1e-9)) * 100.0 if ref_pct>0 else 0.0
+                dedic = (val / (base_mensual * meses + 1e-9)) * 100.0 if base_mensual>0 and meses>0 else 0.0
                 pitem = self.tbl_oficina.item(row,2)
                 if pitem is None:
                     self.tbl_oficina.setItem(row,2, QTableWidgetItem())
                     pitem = self.tbl_oficina.item(row,2)
-                pitem.setText(f"{util:.4f}")
-            elif col == 2:  # % util
+                pitem.setText(f"{dedic:.4f}")
+            elif col in (2,3):
                 try:
-                    util = float((item.text() or '0').replace('%','').strip())
+                    dedic = float((self.tbl_oficina.item(row,2).text() or '0').replace('%','').strip())
                 except Exception:
-                    util = 0.0
-                try:
-                    ref_pct = float((self.tbl_oficina.item(row,1).text() or '0').replace('%','').strip())
-                except Exception:
-                    ref_pct = 0.0
-                eff_pct = ref_pct * (util/100.0)
-                val = self.costo_directo * (eff_pct/100.0)
-                vitem = self.tbl_oficina.item(row,3)
+                    dedic = 0.0
+                val = base_mensual * meses * (dedic/100.0)
+                vitem = self.tbl_oficina.item(row,4)
                 if vitem is None:
-                    self.tbl_oficina.setItem(row,3, QTableWidgetItem())
-                    vitem = self.tbl_oficina.item(row,3)
+                    self.tbl_oficina.setItem(row,4, QTableWidgetItem())
+                    vitem = self.tbl_oficina.item(row,4)
                 vitem.setText(f"${val:,.2f}")
         finally:
             self.tbl_oficina.blockSignals(False)
             self._recalculate()
 
     def _on_polizas_changed(self, item):
+        """Mantiene sincronía entre %Req/Meses/%Prima, %Dedic y Valor."""
         row = item.row(); col = item.column()
         self.tbl_polizas.blockSignals(True)
         try:
-            # Column mapping: 0 Concepto | 1 Valor Base | 2 % Dedic | 3 Valor
-            base = self._parse_money(self.tbl_polizas.item(row,1).text() if self.tbl_polizas.item(row,1) else '$0')
-            if col == 3:  # Valor
+            # Column mapping nueva: 0 Concepto | 1 %Req | 2 Meses | 3 %Prima | 4 Valor Base | 5 %Dedic | 6 Valor
+            # Releer parámetros
+            try:
+                req = float((self.tbl_polizas.item(row,1).text() or '0').replace('%','').strip())
+            except Exception:
+                req = 0.0
+            try:
+                meses = float((self.tbl_polizas.item(row,2).text() or '0').strip())
+            except Exception:
+                meses = 0.0
+            try:
+                prima = float((self.tbl_polizas.item(row,3).text() or '0').replace('%','').strip())
+            except Exception:
+                prima = 0.0
+
+            # Calcular base y escribirla (si cambian req/meses/prima)
+            base_val = self.costo_directo * (req/100.0) * (prima/100.0) * (meses/12.0)
+            base_item = self.tbl_polizas.item(row,4)
+            if base_item is None:
+                self.tbl_polizas.setItem(row,4, QTableWidgetItem())
+                base_item = self.tbl_polizas.item(row,4)
+            base_item.setText(f"${base_val:,.2f}")
+
+            # Si editaron Valor (col 6), recalcular %Dedic; si editaron %Dedic o params, recalcular Valor
+            if col == 6:
                 val = self._parse_money(item.text())
-                ded = (val / (base + 1e-9)) * 100.0 if base > 0 else 0.0
-                pitem = self.tbl_polizas.item(row,2)
-                if pitem is None:
-                    self.tbl_polizas.setItem(row,2, QTableWidgetItem())
-                    pitem = self.tbl_polizas.item(row,2)
-                pitem.setText(f"{ded:.4f}")
-            elif col in (1,2):
+                ded = (val / (base_val + 1e-9)) * 100.0 if base_val > 0 else 0.0
+                ditem = self.tbl_polizas.item(row,5)
+                if ditem is None:
+                    self.tbl_polizas.setItem(row,5, QTableWidgetItem())
+                    ditem = self.tbl_polizas.item(row,5)
+                ditem.setText(f"{ded:.4f}")
+            else:
                 try:
-                    ded = float((self.tbl_polizas.item(row,2).text() or '0').replace('%','').strip())
+                    ded = float((self.tbl_polizas.item(row,5).text() or '0').replace('%','').strip())
                 except Exception:
                     ded = 0.0
-                val = base * (ded/100.0)
-                vitem = self.tbl_polizas.item(row,3)
+                val = base_val * (ded/100.0)
+                vitem = self.tbl_polizas.item(row,6)
                 if vitem is None:
-                    self.tbl_polizas.setItem(row,3, QTableWidgetItem())
-                    vitem = self.tbl_polizas.item(row,3)
+                    self.tbl_polizas.setItem(row,6, QTableWidgetItem())
+                    vitem = self.tbl_polizas.item(row,6)
                 vitem.setText(f"${val:,.2f}")
         finally:
             self.tbl_polizas.blockSignals(False)
@@ -496,29 +730,49 @@ class AdministracionWindow(QDialog):
         row = item.row(); col = item.column()
         self.tbl_estamp.blockSignals(True)
         try:
-            # Column mapping: 0 Concepto | 1 Valor Base | 2 % Dedic | 3 Valor
-            base = self._parse_money(self.tbl_estamp.item(row,1).text() if self.tbl_estamp.item(row,1) else '$0')
-            if col == 3:  # Valor
-                val = self._parse_money(item.text())
-                ded = (val / (base + 1e-9)) * 100.0 if base > 0 else 0.0
-                pitem = self.tbl_estamp.item(row,2)
-                if pitem is None:
-                    self.tbl_estamp.setItem(row,2, QTableWidgetItem())
-                    pitem = self.tbl_estamp.item(row,2)
-                pitem.setText(f"{ded:.4f}")
-            elif col in (1,2):
-                try:
-                    ded = float((self.tbl_estamp.item(row,2).text() or '0').replace('%','').strip())
-                except Exception:
-                    ded = 0.0
-                val = base * (ded/100.0)
-                vitem = self.tbl_estamp.item(row,3)
-                if vitem is None:
-                    self.tbl_estamp.setItem(row,3, QTableWidgetItem())
-                    vitem = self.tbl_estamp.item(row,3)
-                vitem.setText(f"${val:,.2f}")
+            # Column mapping nueva: 0 Concepto | 1 % Tasa | 2 Valor
+            try:
+                tasa = float((self.tbl_estamp.item(row,1).text() or '0').replace('%','').strip())
+            except Exception:
+                tasa = 0.0
+            val = self.costo_directo * (tasa/100.0)
+            vitem = self.tbl_estamp.item(row,2)
+            if vitem is None:
+                self.tbl_estamp.setItem(row,2, QTableWidgetItem())
+                vitem = self.tbl_estamp.item(row,2)
+            vitem.setText(f"${val:,.2f}")
         finally:
             self.tbl_estamp.blockSignals(False)
+            self._recalculate()
+
+    def _on_global_months_changed(self, _):
+        """Copia la duración global a la columna Meses de Oficina y a Profesionales."""
+        m = self.meses_global_spin.value()
+        self.tbl_oficina.blockSignals(True)
+        try:
+            for r in range(self.tbl_oficina.rowCount()):
+                # saltar si es subtotal
+                it = self.tbl_oficina.item(r,0)
+                if it and it.text().strip().lower() == 'subtotal':
+                    continue
+                cell = self.tbl_oficina.item(r,3)
+                if cell is None:
+                    self.tbl_oficina.setItem(r,3, QTableWidgetItem())
+                    cell = self.tbl_oficina.item(r,3)
+                cell.setText(f"{m:.2f}")
+        finally:
+            self.tbl_oficina.blockSignals(False)
+        # Actualizar meses en profesionales (col 4)
+        self.table.blockSignals(True)
+        try:
+            for r in range(self.table.rowCount()):
+                cell = self.table.item(r,4)
+                if cell is None:
+                    self.table.setItem(r,4, QTableWidgetItem())
+                    cell = self.table.item(r,4)
+                cell.setText(f"{m:.2f}")
+        finally:
+            self.table.blockSignals(False)
             self._recalculate()
 
     # ---------- Slots ----------
@@ -600,6 +854,67 @@ class AdministracionWindow(QDialog):
         dlg.professional_selected.connect(_on_selected)
         dlg.exec()
 
+    # ---------- Add rows to subtables ----------
+    def _on_add_oficina(self):
+        r = self.tbl_oficina.rowCount()
+        self.tbl_oficina.insertRow(r)
+        self.tbl_oficina.setItem(r, 0, QTableWidgetItem("Nuevo concepto"))
+        self.tbl_oficina.setItem(r, 1, QTableWidgetItem("$0.00"))
+        self.tbl_oficina.setItem(r, 2, QTableWidgetItem("0.00"))
+        self.tbl_oficina.setItem(r, 3, QTableWidgetItem(f"{self.meses_global_spin.value():.2f}"))
+        self.tbl_oficina.setItem(r, 4, QTableWidgetItem("$0.00"))
+        self._recalculate()
+
+    def _on_add_poliza(self):
+        r = self.tbl_polizas.rowCount()
+        self.tbl_polizas.insertRow(r)
+        self.tbl_polizas.setItem(r, 0, QTableWidgetItem("Nueva póliza"))
+        self.tbl_polizas.setItem(r, 1, QTableWidgetItem("0.00"))  # % Req.
+        self.tbl_polizas.setItem(r, 2, QTableWidgetItem(f"{self.meses_global_spin.value():.2f}"))  # Meses
+        self.tbl_polizas.setItem(r, 3, QTableWidgetItem("0.000"))  # % Prima
+        self.tbl_polizas.setItem(r, 4, QTableWidgetItem("$0.00"))  # Base
+        self.tbl_polizas.setItem(r, 5, QTableWidgetItem("0.00"))   # % Dedic.
+        self.tbl_polizas.setItem(r, 6, QTableWidgetItem("$0.00"))  # Valor
+        self._recalculate()
+
+    def _on_add_estamp(self):
+        r = self.tbl_estamp.rowCount()
+        self.tbl_estamp.insertRow(r)
+        self.tbl_estamp.setItem(r, 0, QTableWidgetItem("Nueva estampilla"))
+        self.tbl_estamp.setItem(r, 1, QTableWidgetItem("0.00"))  # % tasa
+        self.tbl_estamp.setItem(r, 2, QTableWidgetItem("$0.00"))
+        self._recalculate()
+
+    def _on_del_oficina(self):
+        idxs = self.tbl_oficina.selectionModel().selectedRows()
+        rows = sorted([i.row() for i in idxs], reverse=True)
+        for r in rows:
+            it = self.tbl_oficina.item(r,0)
+            if it and it.text().strip().lower() == 'subtotal':
+                continue
+            self.tbl_oficina.removeRow(r)
+        self._recalculate()
+
+    def _on_del_poliza(self):
+        idxs = self.tbl_polizas.selectionModel().selectedRows()
+        rows = sorted([i.row() for i in idxs], reverse=True)
+        for r in rows:
+            it = self.tbl_polizas.item(r,0)
+            if it and it.text().strip().lower() == 'subtotal':
+                continue
+            self.tbl_polizas.removeRow(r)
+        self._recalculate()
+
+    def _on_del_estamp(self):
+        idxs = self.tbl_estamp.selectionModel().selectedRows()
+        rows = sorted([i.row() for i in idxs], reverse=True)
+        for r in rows:
+            it = self.tbl_estamp.item(r,0)
+            if it and it.text().strip().lower() == 'subtotal':
+                continue
+            self.tbl_estamp.removeRow(r)
+        self._recalculate()
+
     # ---------- Auto adjust ----------
     def _on_auto_adjust(self):
         admin_pct = self.admin_target_spin.value()
@@ -607,39 +922,56 @@ class AdministracionWindow(QDialog):
             return
         admin_obj = self.costo_directo * (admin_pct/100.0)
 
-        # 1) Ajustar profesionales proporcionalmente según base salario*meses
+        # 1) Ajustar profesionales: mantener % dedicación fija (Director 50%, demás 100%)
+        # y ESCALAR el salario mostrado según el objetivo (sin acumular).
+        # Base para repartir: salario_base * meses
         base_prof = 0.0
+        salarios_base = []
+        meses_list = []
         for row in range(self.table.rowCount()):
+            sal_item = self.table.item(row,2)
             try:
-                salario = float(self.table.item(row,2).text().replace('$','').replace(',',''))
+                sal_base = float(sal_item.data(Qt.ItemDataRole.UserRole)) if sal_item is not None else 0.0
             except Exception:
-                salario = 0.0
+                # si no está guardado, inferir del texto actual
+                sal_base = 0.0
+            if sal_base <= 0:
+                try:
+                    sal_base = float((self.table.item(row,2).text() or '0').replace('$','').replace(',',''))
+                except Exception:
+                    sal_base = 0.0
+            salarios_base.append(sal_base)
             try:
-                meses = float(self.table.item(row,4).text() or 0)
+                m = float((self.table.item(row,4).text() or '0').strip())
             except Exception:
-                meses = 0.0
-            base_prof += salario * meses
+                m = 0.0
+            meses_list.append(m)
+            base_prof += sal_base * m
 
-        # Reiniciar dedicación antes de repartir para no acumular al re-ejecutar
+        admin_alloc_prof = admin_obj * 0.5 if base_prof > 0 else 0.0
+        # Escalar salarios proporcionalmente a su peso (salario_base*meses)
         for row in range(self.table.rowCount()):
-            item = self.table.item(row,3)
-            if item:
-                item.setText("0.0")
-
-        admin_alloc_prof = admin_obj * 0.5 if base_prof > 0 else 0.0  # 50% a profesionales por defecto
-        ded_value = round(min((admin_alloc_prof / base_prof) * 100.0, 100.0), 2) if base_prof > 0 else 0.0
-        for row in range(self.table.rowCount()):
-            self.table.item(row,3).setText(str(ded_value))
+            weight = salarios_base[row] * meses_list[row]
+            if base_prof > 0 and weight > 0:
+                extra_total = admin_alloc_prof * (weight / base_prof)
+                # salario nuevo = salario_base + (extra_total / meses)
+                new_salary = salarios_base[row] + (extra_total / max(meses_list[row], 1e-9))
+            else:
+                new_salary = salarios_base[row]
+            sal_item = self.table.item(row,2)
+            if sal_item is not None:
+                # mostrar el nuevo salario pero NO sobrescribir el base guardado
+                sal_item.setText(f"${new_salary:,.2f}")
 
         # 2) Ajustar subgastos (Oficina/Polizas/Estampillas) proporcionalmente por pesos actuales
         # Calcular valor actual de cada fila y total
-        # Reset base of dedication to 0 before distributing
+        # Reset % dedicación (no tocar meses ni parámetros)
         for r in range(self.tbl_oficina.rowCount()):
-            self.tbl_oficina.item(r,2).setText("0.00")
+            self.tbl_oficina.item(r,2).setText("0.00")  # % Dedic.
         for r in range(self.tbl_polizas.rowCount()):
-            self.tbl_polizas.item(r,2).setText("0.00")
+            self.tbl_polizas.item(r,5).setText("0.00")  # % Dedic.
         for r in range(self.tbl_estamp.rowCount()):
-            self.tbl_estamp.item(r,2).setText("0.00")
+            self.tbl_estamp.item(r,2).setText("0.00")  # % Dedic.
 
         self._recalculate()  # update values with zeros base
         rows = []
@@ -656,11 +988,16 @@ class AdministracionWindow(QDialog):
         current_vals = []
         current_sum = 0.0
         for kind, idx in rows:
-            # peso por valor base
+            # peso por valor base (para oficina: base mensual × meses)
             if kind == 'oficina':
-                val = self._parse_money(self.tbl_oficina.item(idx,1).text())
+                base_m = self._parse_money(self.tbl_oficina.item(idx,1).text())
+                try:
+                    m = float((self.tbl_oficina.item(idx,3).text() or '0').strip())
+                except Exception:
+                    m = 0.0
+                val = base_m * m
             elif kind == 'polizas':
-                val = self._parse_money(self.tbl_polizas.item(idx,1).text())
+                val = self._parse_money(self.tbl_polizas.item(idx,4).text())
             else:
                 val = self._parse_money(self.tbl_estamp.item(idx,1).text())
             current_vals.append(val)
@@ -674,28 +1011,41 @@ class AdministracionWindow(QDialog):
         if current_sum <= 0 and len(rows) > 0:
             per = admin_alloc_sub / len(rows)
             for (kind, idx) in rows:
-                pct = (per / self.costo_directo) * 100.0
                 if kind == 'oficina':
-                    self.tbl_oficina.item(idx,1).setText(f"{pct:.4f}")
+                    base_m = self._parse_money(self.tbl_oficina.item(idx,1).text())
+                    try:
+                        m = float((self.tbl_oficina.item(idx,3).text() or '0').strip())
+                    except Exception:
+                        m = 0.0
+                    util = (per / (base_m * m + 1e-9)) * 100.0 if base_m > 0 and m > 0 else 0.0
+                    self.tbl_oficina.item(idx,2).setText(f"{util:.4f}")
                 elif kind == 'polizas':
-                    self.tbl_polizas.item(idx,1).setText(f"{pct:.4f}")
+                    base_v = self._parse_money(self.tbl_polizas.item(idx,4).text())
+                    util = (per / (base_v + 1e-9)) * 100.0 if base_v > 0 else 0.0
+                    self.tbl_polizas.item(idx,5).setText(f"{util:.4f}")
                 else:
-                    self.tbl_estamp.item(idx,1).setText(f"{pct:.4f}")
+                    base_v = self._parse_money(self.tbl_estamp.item(idx,1).text())
+                    util = (per / (base_v + 1e-9)) * 100.0 if base_v > 0 else 0.0
+                    self.tbl_estamp.item(idx,2).setText(f"{util:.4f}")
         elif current_sum > 0:
             for (kind, idx), cur in zip(rows, current_vals):
                 target = admin_alloc_sub * (cur / current_sum)
                 # Ajustar % dedicación con base en Valor Base
                 if kind == 'oficina':
-                    base = self._parse_money(self.tbl_oficina.item(idx,1).text())
-                    util = (target / (base + 1e-9)) * 100.0 if base>0 else 0.0
+                    base_m = self._parse_money(self.tbl_oficina.item(idx,1).text())
+                    try:
+                        m = float((self.tbl_oficina.item(idx,3).text() or '0').strip())
+                    except Exception:
+                        m = 0.0
+                    util = (target / (base_m * m + 1e-9)) * 100.0 if base_m>0 and m>0 else 0.0
                     self.tbl_oficina.item(idx,2).setText(f"{util:.4f}")
                 elif kind == 'polizas':
-                    base = self._parse_money(self.tbl_polizas.item(idx,1).text())
-                    util = (target / (base + 1e-9)) * 100.0 if base>0 else 0.0
-                    self.tbl_polizas.item(idx,2).setText(f"{util:.4f}")
+                    base_v = self._parse_money(self.tbl_polizas.item(idx,4).text())
+                    util = (target / (base_v + 1e-9)) * 100.0 if base_v>0 else 0.0
+                    self.tbl_polizas.item(idx,5).setText(f"{util:.4f}")
                 else:
-                    base = self._parse_money(self.tbl_estamp.item(idx,1).text())
-                    util = (target / (base + 1e-9)) * 100.0 if base>0 else 0.0
+                    base_v = self._parse_money(self.tbl_estamp.item(idx,1).text())
+                    util = (target / (base_v + 1e-9)) * 100.0 if base_v>0 else 0.0
                     self.tbl_estamp.item(idx,2).setText(f"{util:.4f}")
 
         self._recalculate()
