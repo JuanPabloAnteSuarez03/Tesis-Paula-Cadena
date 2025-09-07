@@ -10,7 +10,7 @@ class RecursosPorAnalisisView(QWidget):
     # Señal para notificar cuando se selecciona un recurso (por ejemplo, desde el selector)
     resource_selected_por_analisis = pyqtSignal(str)
     
-    def __init__(self, codigo_analisis, parent=None):
+    def __init__(self, codigo_analisis, parent=None, show_form: bool = True, show_buttons: bool = True):
         super().__init__(parent)
         self.codigo_analisis = codigo_analisis
         self.setWindowTitle(f"Recursos para Análisis {codigo_analisis}")
@@ -22,15 +22,19 @@ class RecursosPorAnalisisView(QWidget):
         header_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.layout.addWidget(header_label)
         
-        # Crear formulario para agregar recurso manualmente
-        self.create_form()
+        # Crear formulario para agregar recurso manualmente (opcional)
+        self._show_form = bool(show_form)
+        self._show_buttons = bool(show_buttons)
+        if self._show_form:
+            self.create_form()
         # Crear la tabla (QTableView con QStandardItemModel)
         self.create_table()
         # Se deja la función load_data vacía, ya que la invoca el controlador
         # (aquí solo se define la interfaz)
         
         # Botones adicionales (por ejemplo, para abrir selector o actualizar)
-        self.setup_buttons()
+        if self._show_buttons:
+            self.setup_buttons()
         
         self.setLayout(self.layout)
         self.setStyleSheet("""
@@ -113,6 +117,9 @@ class RecursosPorAnalisisView(QWidget):
         # Habilitar edición en todas las celdas
         from PyQt6.QtWidgets import QAbstractItemView
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.AllEditTriggers)
+        # Al estar embebida en un scroll externo, evitamos scroll interno para mostrar todas las filas
+        from PyQt6.QtCore import Qt
+        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.layout.addWidget(self.table)
         # (Opcional) Conectar doble clic, si se requiere abrir un selector de recurso
         # self.table.doubleClicked.connect(lambda index: self.resource_selected_por_analisis.emit(self.model.item(index.row(), 0).text()))
@@ -193,6 +200,20 @@ class RecursosPorAnalisisView(QWidget):
         # Ajustar ancho de la primera columna
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(0, 155)
+
+        # Redimensionar filas a contenido y ajustar altura de la tabla para mostrar todas las filas
+        self.table.resizeRowsToContents()
+        try:
+            header_h = self.table.horizontalHeader().height()
+            rows_h = self.table.verticalHeader().length()
+            frame = self.table.frameWidth() * 2
+            total_h = int(header_h + rows_h + frame + 4)
+            # Si no mostramos formulario, dejamos la tabla sin scroll interno mostrando todo
+            if not getattr(self, '_show_form', True):
+                self.table.setMinimumHeight(total_h)
+                self.table.setMaximumHeight(total_h)
+        except Exception:
+            pass
 
     def get_form_data(self):
         # Obtiene los datos del formulario manual

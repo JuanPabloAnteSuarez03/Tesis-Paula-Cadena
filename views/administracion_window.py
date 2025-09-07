@@ -12,7 +12,7 @@ class AdministracionWindow(QDialog):
 
     aiu_computed = pyqtSignal(dict)  # Emite total de costos indirectos
 
-    def __init__(self, profesionales: list[dict], costo_directo: float, parent: QWidget | None = None):
+    def __init__(self, profesionales: list[dict], costo_directo: float, parent: QWidget | None = None, embedded: bool = False):
         super().__init__(parent)
         self.setWindowTitle("Costos Indirectos (AIU)")
         self.resize(1400, 900)
@@ -26,6 +26,7 @@ class AdministracionWindow(QDialog):
                 pass
         self.profesionales = profesionales
         self.costo_directo = costo_directo
+        self.embedded = embedded
         self._build_ui()
         self._load_profesionales()
         self._recalculate()
@@ -47,7 +48,11 @@ class AdministracionWindow(QDialog):
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        layout.addWidget(self.table)
+        # Contenedor de profesionales (para usarlo dentro de un splitter)
+        prof_container = QWidget()
+        prof_v = QVBoxLayout(prof_container)
+        prof_v.setContentsMargins(0,0,0,0)
+        prof_v.addWidget(self.table)
 
         # Subgastos administrativos en múltiples subtablas
         from PyQt6.QtWidgets import QGroupBox, QGridLayout, QLabel, QSpacerItem, QSizePolicy, QSplitter
@@ -183,7 +188,13 @@ class AdministracionWindow(QDialog):
         sub_layout.setColumnStretch(0, 1)
         sub_layout.setColumnStretch(1, 1)
 
-        layout.addWidget(sub_box)
+        # Splitter vertical para ajustar profesionales vs subgastos (dar más espacio a subgastos)
+        split_v = QSplitter(Qt.Orientation.Vertical)
+        split_v.addWidget(prof_container)
+        split_v.addWidget(sub_box)
+        split_v.setStretchFactor(0, 2)
+        split_v.setStretchFactor(1, 3)
+        layout.addWidget(split_v)
         # Conexiones de botones inferiores
         self.btn_add_oficina_b.clicked.connect(self._on_add_oficina)
         self.btn_del_oficina_b.clicked.connect(self._on_del_oficina)
@@ -254,10 +265,18 @@ class AdministracionWindow(QDialog):
         bold.setBold(True)
         self.tot_aiu_lbl.setFont(bold)
 
+        # Panel compacto para totales (reducido)
+        totals_panel = QWidget()
+        totals_layout = QVBoxLayout(totals_panel)
+        totals_layout.setContentsMargins(6, 4, 6, 4)
+        totals_layout.setSpacing(2)
         for lbl in [self.tot_admin_lbl, self.tot_office_lbl, self.tot_polizas_lbl, self.tot_estamp_lbl,
                     self.tot_imprev_lbl, self.tot_util_lbl, self.tot_iva_lbl, self.tot_aiu_lbl]:
             lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
-            layout.addWidget(lbl)
+            totals_layout.addWidget(lbl)
+        # Ajuste para evitar que el texto inferior se corte; dar más holgura
+        totals_panel.setMaximumHeight(200)
+        layout.addWidget(totals_panel)
 
         # Controls row for checkbox and add button
         ctrl_bar = QHBoxLayout()
@@ -834,7 +853,8 @@ class AdministracionWindow(QDialog):
             'estampillas_pct': 0.0,
             'total_aiu': getattr(self, '_current_aiu', 0.0)
         })
-        self.accept()
+        if not getattr(self, 'embedded', False):
+            self.accept()
 
     def _reload_based_on_checkbox(self):
         if self.include_chk.isChecked():
@@ -1048,4 +1068,4 @@ class AdministracionWindow(QDialog):
                     util = (target / (base_v + 1e-9)) * 100.0 if base_v>0 else 0.0
                     self.tbl_estamp.item(idx,2).setText(f"{util:.4f}")
 
-        self._recalculate()
+        self._recalculate() 
