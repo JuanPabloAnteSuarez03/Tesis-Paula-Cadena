@@ -11,6 +11,7 @@ import re
 from models.profesional import Profesional
 from models.database import SessionLocal
 from views.administracion_window import AdministracionWindow
+from views.importar_por_texto_dialog import ImportarPorTextoDialog
 
 class PresupuestoView(QWidget):
     analisis_selected = pyqtSignal(str)
@@ -219,6 +220,7 @@ class PresupuestoView(QWidget):
         self.edit_item_desc_button = QPushButton("Modificar Descripción")
         self.edit_analysis_button = QPushButton("Editar Análisis")
         self.import_button = QPushButton("Importar CSV")
+        self.import_text_button = QPushButton("Importar por Texto")
         self.export_button = QPushButton("Exportar CSV")
         self.insert_item_button = QPushButton("Insertar Ítem")
         self.delete_row_button = QPushButton("Eliminar Item")
@@ -232,6 +234,7 @@ class PresupuestoView(QWidget):
         self.edit_analysis_button.clicked.connect(self.edit_selected_analysis)
         self.import_button.clicked.connect(self.import_csv)
         self.export_button.clicked.connect(self.export_csv)
+        self.import_text_button.clicked.connect(self.open_import_text_dialog)
         self.delete_row_button.clicked.connect(self.delete_selected_row)
         self.aiu_button.clicked.connect(self.open_administracion_window)
         
@@ -242,12 +245,87 @@ class PresupuestoView(QWidget):
         button_layout.addWidget(self.edit_analysis_button)
         button_layout.addWidget(self.import_button)
         button_layout.addWidget(self.export_button)
+        button_layout.addWidget(self.import_text_button)
         button_layout.addWidget(self.insert_item_button)
         button_layout.addWidget(self.delete_row_button)
         button_layout.addWidget(self.aiu_button)
         button_layout.addStretch(1)
         
         self.layout.addLayout(button_layout)
+
+    def open_import_text_dialog(self):
+        dialog = ImportarPorTextoDialog(self)
+        if dialog.exec():
+            rows = dialog.result_rows()
+            if not rows:
+                return
+            # Insertar filas como capítulos o análisis según ITEM
+            self.table.blockSignals(True)
+            try:
+                # Limpiar presupuesto actual y contadores
+                self.table.setRowCount(0)
+                self.chapter_counter = 0
+                for entry in rows:
+                    item_str = (entry.get('item') or '').strip()
+                    desc = (entry.get('descripcion') or '').strip()
+                    und = (entry.get('unidad') or '').strip()
+                    cantidad = entry.get('cantidad') or 1.0
+
+                    if not desc:
+                        continue
+
+                    # Capítulo: número entero (1, 2, 3)
+                    is_chapter = False
+                    if item_str:
+                        try:
+                            # válido si es entero con solo dígitos
+                            is_chapter = item_str.isdigit()
+                        except Exception:
+                            is_chapter = False
+
+                    if is_chapter:
+                        self.add_chapter_row(desc, trigger_rebuild=False)
+                        continue
+
+                    # Análisis: subnúmero como 1.1, 2.03, 3.1.1 (se acepta como texto)
+                    # Insertamos fila de análisis vacía con unidad/cantidad; costo unitario en 0 y pendiente de match
+                    row_idx = self.table.rowCount()
+                    self.table.insertRow(row_idx)
+                    # Columna 0: item (se renumerará después), guardamos marcador para diferenciar de capítulos
+                    code_item = QTableWidgetItem(item_str or "...")
+                    self.table.setItem(row_idx, 0, code_item)
+
+                    # Columna 1: descripción
+                    desc_item = QTableWidgetItem(desc)
+                    desc_item.setToolTip(desc)
+                    self.table.setItem(row_idx, 1, desc_item)
+
+                    # Columna 2: unidad
+                    und_item = QTableWidgetItem(und.upper())
+                    und_item.setFlags(und_item.flags() | Qt.ItemFlag.ItemIsEditable)
+                    self.table.setItem(row_idx, 2, und_item)
+
+                    # Columna 3: cantidad
+                    try:
+                        qty_val = float(cantidad)
+                    except Exception:
+                        qty_val = 1.0
+                    qty_item = QTableWidgetItem(str(qty_val))
+                    qty_item.setFlags(qty_item.flags() | Qt.ItemFlag.ItemIsEditable)
+                    self.table.setItem(row_idx, 3, qty_item)
+
+                    # Columna 4: costo unitario (se completará al emparejar con análisis de BD)
+                    cu_item = QTableWidgetItem("$0.00")
+                    self.table.setItem(row_idx, 4, cu_item)
+
+                    # Columna 5: total
+                    ct_item = QTableWidgetItem("$0.00")
+                    self.table.setItem(row_idx, 5, ct_item)
+
+                # Renumerar y recalcular subtotales, sin tocar costos unitarios
+                self.rebuild_table_safe()
+            finally:
+                self.table.blockSignals(False)
 
     def prompt_add_chapter(self):
         """Pide al usuario el nombre del capítulo y lo agrega."""

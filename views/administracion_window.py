@@ -604,7 +604,7 @@ class AdministracionWindow(QDialog):
         self.tot_imprev_lbl.setText(f"Imprevistos ({imp_pct:.2f}%): ${imprev_total:,.2f}")
         self.tot_util_lbl.setText(f"Utilidad ({util_pct:.2f}%): ${util_total:,.2f}")
         self.tot_iva_lbl.setText(f"IVA Utilidad ({iva_pct:.2f}%): ${iva_total:,.2f}")
-        self.tot_aiu_lbl.setText(f"Total Costos Indirectos: ${total_aiu:,.2f}")
+        self.tot_aiu_lbl.setText(f"Costo Total AIU: ${total_aiu:,.2f}")
 
         # Guardar administración combinada (para enviar al presupuesto)
         self._admin_total = admin_combined
