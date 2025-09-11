@@ -12,6 +12,7 @@ from models.profesional import Profesional
 from models.database import SessionLocal
 from views.administracion_window import AdministracionWindow
 from views.importar_por_texto_dialog import ImportarPorTextoDialog
+from views.analisis_match_dialog import AnalisisMatchDialog
 
 class PresupuestoView(QWidget):
     analisis_selected = pyqtSignal(str)
@@ -218,6 +219,7 @@ class PresupuestoView(QWidget):
         self.edit_chapter_button = QPushButton("Editar Capítulo")
         self.delete_chapter_button = QPushButton("Eliminar Capítulo")
         self.edit_item_desc_button = QPushButton("Modificar Descripción")
+        self.match_button = QPushButton("Buscar Análisis")
         self.edit_analysis_button = QPushButton("Editar Análisis")
         self.import_button = QPushButton("Importar CSV")
         self.import_text_button = QPushButton("Importar por Texto")
@@ -231,6 +233,7 @@ class PresupuestoView(QWidget):
         self.delete_chapter_button.clicked.connect(self.prompt_delete_chapter)
         self.insert_item_button.clicked.connect(self.open_insert_item_dialog)
         self.edit_item_desc_button.clicked.connect(self.edit_selected_item_description)
+        self.match_button.clicked.connect(self.open_match_dialog_for_selected)
         self.edit_analysis_button.clicked.connect(self.edit_selected_analysis)
         self.import_button.clicked.connect(self.import_csv)
         self.export_button.clicked.connect(self.export_csv)
@@ -242,6 +245,7 @@ class PresupuestoView(QWidget):
         button_layout.addWidget(self.edit_chapter_button)
         button_layout.addWidget(self.delete_chapter_button)
         button_layout.addWidget(self.edit_item_desc_button)
+        button_layout.addWidget(self.match_button)
         button_layout.addWidget(self.edit_analysis_button)
         button_layout.addWidget(self.import_button)
         button_layout.addWidget(self.export_button)
@@ -324,6 +328,120 @@ class PresupuestoView(QWidget):
 
                 # Renumerar y recalcular subtotales, sin tocar costos unitarios
                 self.rebuild_table_safe()
+            finally:
+                self.table.blockSignals(False)
+
+            # Opcional: lanzar buscador para completar costos unitarios ahora
+            try:
+                ask = QMessageBox.question(
+                    self,
+                    "Buscar Análisis",
+                    "¿Desea buscar coincidencias en la base de datos para los ítems importados y seleccionar costos unitarios ahora?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes,
+                )
+            except Exception:
+                ask = QMessageBox.StandardButton.No
+
+            if ask == QMessageBox.StandardButton.Yes:
+                # Recorrer ítems de análisis (no capítulos ni subtotales)
+                for r in range(self.table.rowCount()):
+                    code_item = self.table.item(r, 0)
+                    if not code_item:
+                        continue
+                    role = code_item.data(Qt.ItemDataRole.UserRole)
+                    if role in ["chapter", "subtotal"]:
+                        continue
+
+                    desc = self.table.item(r, 1).text() if self.table.item(r, 1) else ""
+                    und = self.table.item(r, 2).text() if self.table.item(r, 2) else ""
+                    if not desc:
+                        continue
+
+                    dlg = AnalisisMatchDialog(desc, und, parent=self)
+                    if dlg.exec():
+                        sel = dlg.selected_analysis()
+                        if sel:
+                            try:
+                                self.table.blockSignals(True)
+                                # Guardar código en UserRole de la columna 0
+                                if not code_item:
+                                    code_item = QTableWidgetItem("...")
+                                    self.table.setItem(r, 0, code_item)
+                                code_item.setData(Qt.ItemDataRole.UserRole, sel['codigo'])
+
+                                # Unidad
+                                und_item = self.table.item(r, 2)
+                                if not und_item:
+                                    und_item = QTableWidgetItem("")
+                                    self.table.setItem(r, 2, und_item)
+                                und_item.setText((sel['unidad'] or '').upper())
+
+                                # Costo unitario
+                                cu_item = self.table.item(r, 4)
+                                if not cu_item:
+                                    cu_item = QTableWidgetItem()
+                                    self.table.setItem(r, 4, cu_item)
+                                cu_item.setText(f"${sel['costo_unitario']:,.2f}")
+
+                                # Recalcular totales
+                                self.update_row_total(r)
+                            finally:
+                                self.table.blockSignals(False)
+
+                # Actualizar totales generales y subtotales después del proceso
+                self.update_total_presupuesto()
+
+    def open_match_dialog_for_selected(self):
+        """Abre el buscador de análisis por unidad y descripción para la fila seleccionada."""
+        selected_items = self.table.selectedItems()
+        if not selected_items:
+            QMessageBox.warning(self, "Sin selección", "Seleccione una fila de análisis para buscar coincidencias.")
+            return
+        row = selected_items[0].row()
+
+        # No permitir capítulos ni subtotales
+        code_item = self.table.item(row, 0)
+        if not code_item or (code_item.data(Qt.ItemDataRole.UserRole) in ["chapter", "subtotal"]):
+            QMessageBox.warning(self, "Operación no válida", "Seleccione una fila de análisis (no capítulo ni subtotal).")
+            return
+
+        desc = self.table.item(row, 1).text() if self.table.item(row, 1) else ""
+        und = self.table.item(row, 2).text() if self.table.item(row, 2) else ""
+
+        if not desc:
+            QMessageBox.warning(self, "Datos incompletos", "La fila seleccionada no tiene descripción.")
+            return
+
+        dialog = AnalisisMatchDialog(desc, und, parent=self)
+        if dialog.exec():
+            sel = dialog.selected_analysis()
+            if not sel:
+                return
+            # Aplicar: código, unidad y costo unitario
+            # 1) Guardar código original en UserRole para la fila
+            try:
+                self.table.blockSignals(True)
+                code_item = self.table.item(row, 0)
+                if not code_item:
+                    code_item = QTableWidgetItem("...")
+                    self.table.setItem(row, 0, code_item)
+                code_item.setData(Qt.ItemDataRole.UserRole, sel['codigo'])
+                # 2) Actualizar unidad si está vacía o distinta
+                und_item = self.table.item(row, 2)
+                if not und_item:
+                    und_item = QTableWidgetItem("")
+                    self.table.setItem(row, 2, und_item)
+                und_item.setText((sel['unidad'] or '').upper())
+                # 3) Establecer costo unitario
+                cu_item = self.table.item(row, 4)
+                if not cu_item:
+                    cu_item = QTableWidgetItem()
+                    self.table.setItem(row, 4, cu_item)
+                cu_item.setText(f"${sel['costo_unitario']:,.2f}")
+                # 4) Recalcular total de la fila y totales
+                self.update_row_total(row)
+                self.update_total_presupuesto()
             finally:
                 self.table.blockSignals(False)
 
