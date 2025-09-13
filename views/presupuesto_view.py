@@ -1,10 +1,10 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QHeaderView, QPushButton, QLineEdit, QLabel, QMessageBox, QFileDialog,
-    QInputDialog, QApplication, QDialog
+    QInputDialog, QApplication, QDialog, QToolButton, QMenu
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtGui import QColor, QFont, QAction
 from controllers.analisis_unitarios_controller import AnalisisUnitariosController
 import csv
 import re
@@ -58,6 +58,15 @@ class PresupuestoView(QWidget):
             QPushButton:hover {
                 background-color: #005A9E;
             }
+            QToolButton {
+                background-color: #007ACC;
+                color: white;
+                border-radius: 4px;
+                padding: 8px;
+                min-width: 140px;
+            }
+            QToolButton:hover { background-color: #005A9E; }
+            QMenu { font-size: 13px; }
             QLineEdit {
                 padding: 6px;
                 border: 1px solid #cccccc;
@@ -211,48 +220,54 @@ class PresupuestoView(QWidget):
             self.update_total_presupuesto()
 
     def create_buttons(self):
-        """Crea los botones para importar/exportar CSV y capítulos."""
+        """Crea un conjunto compacto de menús por categoría para reducir saturación visual."""
         button_layout = QHBoxLayout()
-        button_layout.addStretch(1)
         
-        self.add_chapter_button = QPushButton("Agregar Capítulo")
-        self.edit_chapter_button = QPushButton("Editar Capítulo")
-        self.delete_chapter_button = QPushButton("Eliminar Capítulo")
-        self.edit_item_desc_button = QPushButton("Modificar Descripción")
-        self.match_button = QPushButton("Buscar Análisis")
-        self.edit_analysis_button = QPushButton("Editar Análisis")
-        self.import_button = QPushButton("Importar CSV")
-        self.import_text_button = QPushButton("Importar por Texto")
-        self.export_button = QPushButton("Exportar CSV")
-        self.insert_item_button = QPushButton("Insertar Ítem")
-        self.delete_row_button = QPushButton("Eliminar Item")
-        self.aiu_button = QPushButton("AIU Profesionales")
+        # Helper para crear botones-menú
+        def make_menu_button(title: str, items: list[tuple[str, callable]]):
+            btn = QToolButton(self)
+            btn.setText(title)
+            btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            menu = QMenu(btn)
+            for text, slot in items:
+                act = QAction(text, self)
+                act.triggered.connect(slot)
+                menu.addAction(act)
+            btn.setMenu(menu)
+            return btn
         
-        self.add_chapter_button.clicked.connect(self.prompt_add_chapter)
-        self.edit_chapter_button.clicked.connect(self.prompt_edit_chapter)
-        self.delete_chapter_button.clicked.connect(self.prompt_delete_chapter)
-        self.insert_item_button.clicked.connect(self.open_insert_item_dialog)
-        self.edit_item_desc_button.clicked.connect(self.edit_selected_item_description)
-        self.match_button.clicked.connect(self.open_match_dialog_for_selected)
-        self.edit_analysis_button.clicked.connect(self.edit_selected_analysis)
-        self.import_button.clicked.connect(self.import_csv)
-        self.export_button.clicked.connect(self.export_csv)
-        self.import_text_button.clicked.connect(self.open_import_text_dialog)
-        self.delete_row_button.clicked.connect(self.delete_selected_row)
-        self.aiu_button.clicked.connect(self.open_administracion_window)
+        # Capítulos
+        btn_capitulos = make_menu_button("Capítulos", [
+            ("Agregar Capítulo", self.prompt_add_chapter),
+            ("Editar Capítulo", self.prompt_edit_chapter),
+            ("Eliminar Capítulo", self.prompt_delete_chapter),
+        ])
         
-        button_layout.addWidget(self.add_chapter_button)
-        button_layout.addWidget(self.edit_chapter_button)
-        button_layout.addWidget(self.delete_chapter_button)
-        button_layout.addWidget(self.edit_item_desc_button)
-        button_layout.addWidget(self.match_button)
-        button_layout.addWidget(self.edit_analysis_button)
-        button_layout.addWidget(self.import_button)
-        button_layout.addWidget(self.export_button)
-        button_layout.addWidget(self.import_text_button)
-        button_layout.addWidget(self.insert_item_button)
-        button_layout.addWidget(self.delete_row_button)
-        button_layout.addWidget(self.aiu_button)
+        # Ítems
+        btn_items = make_menu_button("Ítems", [
+            ("Insertar Ítem", self.open_insert_item_dialog),
+            ("Modificar Descripción", self.edit_selected_item_description),
+            ("Eliminar Ítem", self.delete_selected_row),
+        ])
+        
+        # Análisis
+        btn_analisis = make_menu_button("Análisis", [
+            ("Buscar Análisis (fila)", self.open_match_dialog_for_selected),
+            ("Editar Análisis (fila)", self.edit_selected_analysis),
+        ])
+        
+        # Importar / Exportar
+        btn_io = make_menu_button("Importar/Exportar", [
+            ("Importar CSV", self.import_csv),
+            ("Importar por Texto", self.open_import_text_dialog),
+            ("Exportar CSV", self.export_csv),
+        ])
+        
+        # Añadir en orden lógico
+        button_layout.addWidget(btn_capitulos)
+        button_layout.addWidget(btn_items)
+        button_layout.addWidget(btn_analisis)
+        button_layout.addWidget(btn_io)
         button_layout.addStretch(1)
         
         self.layout.addLayout(button_layout)
