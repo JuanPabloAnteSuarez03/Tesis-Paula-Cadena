@@ -380,7 +380,8 @@ class PresupuestoView(QWidget):
             ("Importar CSV", self.import_csv),
             ("Importar por Texto", self.open_import_text_dialog),
             ("Exportar CSV", self.export_csv),
-            ("Exportar Excel (.xlsx)", self.export_excel),
+            ("Exportar Excel (Template)", self.export_excel),
+            ("Exportar Excel (Desde Cero)", self.export_excel_from_scratch),
         ])
         
         # Añadir en orden lógico
@@ -2028,6 +2029,440 @@ class PresupuestoView(QWidget):
             QMessageBox.information(self, "Exportado", "Se generó el archivo Excel con el formato de la plantilla.")
         except Exception as e:
             QMessageBox.critical(self, "Error al exportar", f"{e}")
+
+    def export_excel_from_scratch(self):
+        """Exporta el presupuesto a un archivo Excel construido completamente desde cero"""
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+            
+            # Seleccionar destino
+            filePath, _ = QFileDialog.getSaveFileName(self, "Exportar Excel", "Presupuesto_Exportado.xlsx", "Excel (*.xlsx)")
+            if not filePath:
+                return
+            
+            # Crear un nuevo workbook
+            wb = Workbook()
+            
+            # =====================
+            # HOJA PRESUPUESTO
+            # =====================
+            ws = wb.active
+            ws.title = "PRESUPUESTO"
+            
+            # Configurar anchos de columna
+            ws.column_dimensions['A'].width = 8    # ITEM
+            ws.column_dimensions['B'].width = 50   # DESCRIPCION  
+            ws.column_dimensions['C'].width = 8    # UND
+            ws.column_dimensions['D'].width = 12   # CANT
+            ws.column_dimensions['E'].width = 15   # VR. UNIT
+            ws.column_dimensions['F'].width = 15   # VR.TOTAL
+            
+            # Estilos reutilizables
+            header_font = Font(bold=True, size=12)
+            chapter_font = Font(bold=True, size=11)
+            subtotal_font = Font(bold=True, size=10)
+            normal_font = Font(size=10)
+            
+            header_fill = PatternFill(fill_type='solid', start_color='FFCCCCCC')
+            chapter_fill = PatternFill(fill_type='solid', start_color='FFEFEFEF')
+            
+            center_align = Alignment(horizontal='center', vertical='center')
+            left_align = Alignment(horizontal='left', vertical='center')
+            right_align = Alignment(horizontal='right', vertical='center')
+            
+            thin_border = Border(
+                left=Side(style='thin'),
+                right=Side(style='thin'),
+                top=Side(style='thin'),
+                bottom=Side(style='thin')
+            )
+            
+            thick_bottom = Border(
+                left=Side(style='thin'),
+                right=Side(style='thin'),
+                top=Side(style='thin'),
+                bottom=Side(style='thick')
+            )
+            
+            thick_top = Border(
+                left=Side(style='thin'),
+                right=Side(style='thin'),
+                top=Side(style='thick'),
+                bottom=Side(style='thin')
+            )
+            
+            # Header del documento
+            ws.merge_cells('A1:C1')
+            ws['A1'] = "NOMBRE DE LA EMPRESA"
+            ws['A1'].font = header_font
+            ws['A1'].alignment = center_align
+            
+            ws.merge_cells('E1:F1')
+            ws['E1'] = "LOGO DE LA EMPRESA"
+            ws['E1'].font = header_font
+            ws['E1'].alignment = center_align
+            
+            # Título principal
+            ws.merge_cells('A3:F3')
+            ws['A3'] = "PRESUPUESTO DE OBRA"
+            ws['A3'].font = Font(bold=True, size=14)
+            ws['A3'].alignment = center_align
+            ws['A3'].fill = header_fill
+            ws['A3'].border = thin_border
+            
+            # Información de la obra
+            ws['A4'] = "Obra:"
+            ws['A4'].font = header_font
+            ws.merge_cells('B4:D4')
+            ws['B4'] = "ESCRIBA AQUÍ EL NOMBRE DE LA OBRA"
+            ws['B4'].border = thin_border
+            
+            ws['E4'] = "FECHA:"
+            ws['E4'].font = header_font
+            ws['F4'] = "19-sept-25"
+            ws['F4'].border = thin_border
+            
+            ws.merge_cells('E5:F5')
+            ws['E5'] = "QUIEN ELABORÓ:"
+            ws['E5'].font = header_font
+            ws['E5'].border = thin_border
+            
+            # Headers de la tabla
+            row = 7
+            headers = ["ITEM", "DESCRIPCION", "UND", "CANT.", "VR. UNIT", "VR.TOTAL"]
+            for col, header in enumerate(headers, 1):
+                cell = ws.cell(row=row, column=col, value=header)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = center_align
+                cell.border = thin_border
+            
+            # Obtener datos del presupuesto usando UserRole
+            from PyQt6.QtCore import Qt
+            chapters = []
+            current = None
+            
+            for tr in range(self.table.rowCount()):
+                it0 = self.table.item(tr, 0)
+                if not it0:
+                    continue
+                    
+                # Usar UserRole para determinar el tipo de fila
+                role = it0.data(Qt.ItemDataRole.UserRole)
+                
+                # Detectar si es capítulo
+                if role == 'chapter':
+                    if current:
+                        chapters.append(current)
+                    desc1 = self.table.item(tr, 1)
+                    current = {
+                        'title': it0.text(),
+                        'desc': desc1.text() if desc1 else '',
+                        'items': [],
+                        'subtotal': 0.0
+                    }
+                # Detectar si es subtotal
+                elif role == 'subtotal':
+                    val_item = self.table.item(tr, 5)  # Columna VR.TOTAL
+                    val_txt = val_item.text() if val_item else '0'
+                    try:
+                        st = float(str(val_txt).replace('$','').replace(',','').replace(' ',''))
+                    except Exception:
+                        st = 0.0
+                    if current:
+                        current['subtotal'] = st
+                # Es un análisis
+                else:
+                    if current is None:
+                        continue
+                    def _txt(c):
+                        x = self.table.item(tr, c)
+                        return x.text() if x else ""
+                    def _num(c):
+                        t = (_txt(c) or '').replace('$','').replace(',','').replace(' ','')
+                        try:
+                            return float(t)
+                        except Exception:
+                            return 0.0
+                    current['items'].append({
+                        'item': it0.text(),
+                        'desc': _txt(1),
+                        'und': (_txt(2) or '').upper(),
+                        'qty': _num(3),
+                        'cu': _num(4),
+                        'ct': _num(5),
+                    })
+            if current:
+                chapters.append(current)
+            
+            # Debug: verificar si hay datos
+            if not chapters:
+                QMessageBox.warning(self, "Sin datos", "No se encontraron capítulos en el presupuesto. Asegúrate de que el presupuesto tenga datos.")
+                return
+                
+            # Escribir cada capítulo como una subtabla
+            current_row = 8
+            for ch in chapters:
+                # Header del capítulo
+                ws.merge_cells(f'A{current_row}:F{current_row}')
+                cell = ws.cell(row=current_row, column=1, value=f"{ch['title']} {ch['desc']}")
+                cell.font = chapter_font
+                cell.fill = chapter_fill
+                cell.alignment = left_align
+                cell.border = thick_bottom
+                ws.row_dimensions[current_row].height = 20
+                current_row += 1
+                
+                # Items del capítulo
+                for item in ch['items']:
+                    ws.cell(row=current_row, column=1, value=item['item']).font = normal_font
+                    ws.cell(row=current_row, column=2, value=item['desc']).font = normal_font
+                    ws.cell(row=current_row, column=3, value=item['und']).font = normal_font
+                    ws.cell(row=current_row, column=4, value=item['qty']).font = normal_font
+                    ws.cell(row=current_row, column=5, value=item['cu']).font = normal_font
+                    ws.cell(row=current_row, column=6, value=item['ct']).font = normal_font
+                    
+                    # Alineaciones y formatos
+                    ws.cell(row=current_row, column=1).alignment = center_align
+                    ws.cell(row=current_row, column=2).alignment = left_align
+                    ws.cell(row=current_row, column=3).alignment = center_align
+                    ws.cell(row=current_row, column=4).alignment = center_align
+                    ws.cell(row=current_row, column=5).alignment = right_align
+                    ws.cell(row=current_row, column=6).alignment = right_align
+                    
+                    # Formatos numéricos
+                    ws.cell(row=current_row, column=4).number_format = '#,##0.00'
+                    ws.cell(row=current_row, column=5).number_format = '#,##0.00'
+                    ws.cell(row=current_row, column=6).number_format = '#,##0.00'
+                    
+                    # Bordes laterales
+                    for col in range(1, 7):
+                        ws.cell(row=current_row, column=col).border = Border(
+                            left=Side(style='thin'),
+                            right=Side(style='thin')
+                        )
+                    
+                    ws.row_dimensions[current_row].height = 18
+                    current_row += 1
+                
+                # Subtotal del capítulo
+                ws.merge_cells(f'A{current_row}:E{current_row}')
+                ws.cell(row=current_row, column=1, value=f"SUBTOTAL {ch['title']}:")
+                ws.cell(row=current_row, column=1).font = subtotal_font
+                ws.cell(row=current_row, column=1).alignment = right_align
+                
+                ws.cell(row=current_row, column=6, value=ch['subtotal'])
+                ws.cell(row=current_row, column=6).font = subtotal_font
+                ws.cell(row=current_row, column=6).alignment = right_align
+                ws.cell(row=current_row, column=6).number_format = '#,##0.00'
+                
+                # Borde superior grueso para el subtotal
+                for col in range(1, 7):
+                    ws.cell(row=current_row, column=col).border = thick_top
+                
+                ws.row_dimensions[current_row].height = 18
+                current_row += 2  # Espacio entre tablas
+            
+            # Tabla de resumen
+            direct_cost = sum(ch['subtotal'] for ch in chapters)
+            
+            # VALOR COSTOS DIRECTOS
+            ws.merge_cells(f'A{current_row}:E{current_row}')
+            ws.cell(row=current_row, column=1, value="VALOR COSTOS DIRECTOS")
+            ws.cell(row=current_row, column=1).font = subtotal_font
+            ws.cell(row=current_row, column=1).alignment = right_align
+            ws.cell(row=current_row, column=1).fill = chapter_fill
+            
+            ws.cell(row=current_row, column=6, value=direct_cost)
+            ws.cell(row=current_row, column=6).font = subtotal_font
+            ws.cell(row=current_row, column=6).alignment = right_align
+            ws.cell(row=current_row, column=6).number_format = '#,##0.00'
+            ws.cell(row=current_row, column=6).fill = chapter_fill
+            
+            for col in range(1, 7):
+                ws.cell(row=current_row, column=col).border = thin_border
+            
+            ws.row_dimensions[current_row].height = 18
+            current_row += 2
+            
+            # COSTOS INDIRECTOS header
+            ws.merge_cells(f'A{current_row}:F{current_row}')
+            ws.cell(row=current_row, column=1, value="COSTOS INDIRECTOS")
+            ws.cell(row=current_row, column=1).font = subtotal_font
+            ws.cell(row=current_row, column=1).alignment = left_align
+            ws.cell(row=current_row, column=1).fill = chapter_fill
+            ws.cell(row=current_row, column=1).border = thin_border
+            ws.row_dimensions[current_row].height = 18
+            current_row += 1
+            
+            # Obtener valores AIU
+            bd = getattr(self, 'aiu_breakdown', None)
+            admin_val = bd.get('admin', 0.0) if bd else 0.0
+            imprev_val = bd.get('imprev', 0.0) if bd else 0.0
+            util_val = bd.get('util', 0.0) if bd else 0.0
+            iva_val = bd.get('iva', 0.0) if bd else 0.0
+            
+            # Calcular porcentajes
+            admin_pct = (admin_val / direct_cost * 100) if direct_cost > 0 else 0
+            imprev_pct = (imprev_val / direct_cost * 100) if direct_cost > 0 else 0
+            util_pct = (util_val / direct_cost * 100) if direct_cost > 0 else 0
+            total_aiu_no_iva = admin_val + imprev_val + util_val
+            total_aiu_pct = (total_aiu_no_iva / direct_cost * 100) if direct_cost > 0 else 0
+            iva_pct = (iva_val / (direct_cost + total_aiu_no_iva) * 100) if (direct_cost + total_aiu_no_iva) > 0 else 0
+            
+            # Líneas del desglose AIU
+            aiu_items = [
+                ("VALOR COSTOS DIRECTOS", direct_cost, ""),
+                ("ADMINISTRACIÓN", admin_val, f"{admin_pct:.2f}%"),
+                ("IMPREVISTOS", imprev_val, f"{imprev_pct:.2f}%"),
+                ("UTILIDAD", util_val, f"{util_pct:.2f}%"),
+                ("TOTAL AIU", total_aiu_no_iva, f"{total_aiu_pct:.2f}%"),
+                ("IVA SOBRE LA UTILIDAD", iva_val, f"{iva_pct:.2f}%"),
+                ("VALOR TOTAL PRESUPUESTO", direct_cost + admin_val + imprev_val + util_val + iva_val, "")
+            ]
+            
+            for label, value, percentage in aiu_items:
+                ws.cell(row=current_row, column=4, value=label)
+                ws.cell(row=current_row, column=4).font = normal_font
+                ws.cell(row=current_row, column=4).alignment = right_align
+                
+                if percentage:
+                    ws.cell(row=current_row, column=5, value=percentage)
+                    ws.cell(row=current_row, column=5).font = normal_font
+                    ws.cell(row=current_row, column=5).alignment = center_align
+                
+                ws.cell(row=current_row, column=6, value=value)
+                ws.cell(row=current_row, column=6).font = subtotal_font if label in ["VALOR COSTOS DIRECTOS", "TOTAL AIU", "VALOR TOTAL PRESUPUESTO"] else normal_font
+                ws.cell(row=current_row, column=6).alignment = right_align
+                ws.cell(row=current_row, column=6).number_format = '#,##0.00'
+                
+                # Formato especial para VALOR TOTAL PRESUPUESTO
+                if label == "VALOR TOTAL PRESUPUESTO":
+                    for col in range(4, 7):
+                        ws.cell(row=current_row, column=col).fill = chapter_fill
+                        ws.cell(row=current_row, column=col).border = thin_border
+                
+                ws.row_dimensions[current_row].height = 18
+                current_row += 1
+            
+            # Total en letras
+            current_row += 1
+            ws.merge_cells(f'A{current_row}:F{current_row}')
+            total_value = direct_cost + admin_val + imprev_val + util_val + iva_val
+            letters_text = self._num_a_letras_es(total_value)
+            ws.cell(row=current_row, column=1, value=f"VALOR TOTAL PRESUPUESTO: {letters_text}")
+            ws.cell(row=current_row, column=1).font = normal_font
+            ws.cell(row=current_row, column=1).alignment = left_align
+            ws.cell(row=current_row, column=1).border = thin_border
+            ws.row_dimensions[current_row].height = 25
+            current_row += 3
+            
+            # Plazo de entrega
+            ws.merge_cells(f'C{current_row}:D{current_row}')
+            ws.cell(row=current_row, column=3, value="PLAZO DE ENTREGA: (DÍAS CALENDARIO)")
+            ws.cell(row=current_row, column=3).font = subtotal_font
+            ws.cell(row=current_row, column=3).alignment = center_align
+            ws.cell(row=current_row, column=3).border = thin_border
+            
+            ws.cell(row=current_row, column=5, value=90)
+            ws.cell(row=current_row, column=5).font = subtotal_font
+            ws.cell(row=current_row, column=5).alignment = center_align
+            ws.cell(row=current_row, column=5).border = thin_border
+            current_row += 3
+            
+            # Firma del representante legal
+            ws.merge_cells(f'A{current_row}:C{current_row+3}')
+            ws.cell(row=current_row, column=1, value="FIRMA DEL REPRESENTANTE LEGAL")
+            ws.cell(row=current_row, column=1).font = subtotal_font
+            ws.cell(row=current_row, column=1).alignment = left_align
+            ws.cell(row=current_row, column=1).border = thin_border
+            
+            # Crear otras hojas (placeholders por ahora)
+            wb.create_sheet("AIU")
+            wb.create_sheet("ANALISIS UNITARIOS") 
+            wb.create_sheet("INSUMOS")
+            
+            # Guardar archivo
+            wb.save(filePath)
+            
+            QMessageBox.information(self, "Éxito", f"Excel exportado exitosamente como: {filePath}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error al exportar Excel: {str(e)}")
+    
+    def _num_a_letras_es(self, numero):
+        """Convierte un número a letras en español"""
+        if numero == 0:
+            return "CERO PESOS"
+        
+        unidades = ["", "UN", "DOS", "TRES", "CUATRO", "CINCO", "SEIS", "SIETE", "OCHO", "NUEVE"]
+        decenas = ["", "", "VEINTE", "TREINTA", "CUARENTA", "CINCUENTA", "SESENTA", "SETENTA", "OCHENTA", "NOVENTA"]
+        centenas = ["", "CIENTO", "DOSCIENTOS", "TRESCIENTOS", "CUATROCIENTOS", "QUINIENTOS", "SEISCIENTOS", "SETECIENTOS", "OCHOCIENTOS", "NOVECIENTOS"]
+        
+        def convertir_centenas(n):
+            if n == 0:
+                return ""
+            elif n == 100:
+                return "CIEN"
+            elif n < 10:
+                return unidades[n]
+            elif n < 20:
+                especiales = ["DIEZ", "ONCE", "DOCE", "TRECE", "CATORCE", "QUINCE", "DIECISEIS", "DIECISIETE", "DIECIOCHO", "DIECINUEVE"]
+                return especiales[n - 10]
+            elif n < 30:
+                return "VEINTI" + unidades[n - 20] if n > 20 else "VEINTE"
+            elif n < 100:
+                return decenas[n // 10] + (" Y " + unidades[n % 10] if n % 10 != 0 else "")
+            else:
+                return centenas[n // 100] + (" " + convertir_centenas(n % 100) if n % 100 != 0 else "")
+        
+        def convertir_miles(n):
+            if n == 0:
+                return ""
+            elif n == 1:
+                return "MIL"
+            elif n < 1000:
+                return convertir_centenas(n) + " MIL"
+            else:
+                return convertir_centenas(n // 1000) + " MIL " + convertir_centenas(n % 1000)
+        
+        def convertir_millones(n):
+            if n == 0:
+                return ""
+            elif n == 1:
+                return "UN MILLON"
+            elif n < 1000:
+                return convertir_centenas(n) + " MILLONES"
+            else:
+                return convertir_miles(n) + " MILLONES"
+        
+        # Convertir el número
+        entero = int(numero)
+        
+        if entero >= 1000000:
+            millones = entero // 1000000
+            resto = entero % 1000000
+            resultado = convertir_millones(millones)
+            if resto >= 1000:
+                miles = resto // 1000
+                centenas_resto = resto % 1000
+                if miles > 0:
+                    resultado += " " + convertir_miles(miles)
+                if centenas_resto > 0:
+                    resultado += " " + convertir_centenas(centenas_resto)
+            elif resto > 0:
+                resultado += " " + convertir_centenas(resto)
+        elif entero >= 1000:
+            miles = entero // 1000
+            resto = entero % 1000
+            resultado = convertir_miles(miles)
+            if resto > 0:
+                resultado += " " + convertir_centenas(resto)
+        else:
+            resultado = convertir_centenas(entero)
+        
+        return resultado.strip() + " PESOS"
 
     def import_csv(self):
         """Importa datos desde un archivo CSV al presupuesto y calcula automáticamente los totales."""
