@@ -1,15 +1,21 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QHeaderView, QPushButton, QLineEdit, QLabel, QMessageBox, QFileDialog,
-    QInputDialog, QApplication, QDialog, QToolButton, QMenu
+    QInputDialog, QApplication, QDialog, QToolButton, QMenu, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QAction
+import os
+from openpyxl import load_workbook
+from openpyxl.cell.cell import MergedCell
+from openpyxl.styles import Font as XLFont, PatternFill as XLFill, Alignment as XLAlign, Border as XLBorder, Side as XLSide
 from controllers.analisis_unitarios_controller import AnalisisUnitariosController
 import csv
 import re
 from models.profesional import Profesional
 from models.database import SessionLocal
+from models.analisis_unitario import AnalisisUnitario
+from models.analisis_unitario_recurso import AnalisisUnitarioRecurso
 from views.administracion_window import AdministracionWindow
 from views.importar_por_texto_dialog import ImportarPorTextoDialog
 from views.analisis_match_dialog import AnalisisMatchDialog
@@ -66,7 +72,22 @@ class PresupuestoView(QWidget):
                 min-width: 140px;
             }
             QToolButton:hover { background-color: #005A9E; }
-            QMenu { font-size: 13px; }
+            QMenu {
+                background-color: #007ACC;
+                color: white;
+                border: 1px solid #005A9E;
+                padding: 0px;
+                border-radius: 4px;
+                font-size: 13px;
+            }
+            QMenu::item {
+                background-color: #007ACC;
+                color: white;
+                padding: 8px 12px;
+            }
+            QMenu::item:selected {
+                background-color: #005A9E;
+            }
             QLineEdit {
                 padding: 6px;
                 border: 1px solid #cccccc;
@@ -160,6 +181,94 @@ class PresupuestoView(QWidget):
             except Exception:
                 pass
 
+            # ---- Mejorar formato de filas finales: Valor Total, Plazo, Firma ----
+            def _find_row_by_labels(sheet, labels: list[str]):
+                Ls = [_norm(x) for x in labels]
+                for rr in range(1, sheet.max_row + 1):
+                    for cc in range(1, min(12, sheet.max_column or 12) + 1):
+                        v = sheet.cell(row=rr, column=cc).value
+                        if isinstance(v, str) and any(lbl in _norm(v) for lbl in Ls):
+                            return rr
+                return None
+
+            header_fill = XLFill(fill_type='solid', start_color='FFEFEFEF', end_color='FFEFEFEF')
+            bold_font = XLFont(bold=True)
+            medium = XLSide(style='medium', color='FF000000')
+            box_border = XLBorder(left=medium, right=medium, top=medium, bottom=medium)
+
+            # Valor total presupuesto (cabecera y caja de letras)
+            vt_row = _find_row_by_labels(ws_ppto, ['VALOR  TOTAL PRESUPUESTO', 'VALOR TOTAL PRESUPUESTO'])
+            if vt_row:
+                try:
+                    ws_ppto.row_dimensions[vt_row].height = 20
+                except Exception:
+                    pass
+                for c in range(2, 7):
+                    try:
+                        # Asegurar que estilizamos la celda ancla
+                        label_cell = _set(ws_ppto, vt_row, c, ws_ppto.cell(row=vt_row, column=c).value)
+                        label_cell.font = bold_font
+                        label_cell.fill = header_fill
+                        label_cell.alignment = XLAlign(horizontal='center', vertical='center')
+                        label_cell.border = box_border
+                    except Exception:
+                        pass
+                # Fila inferior (letras) con borde caja y wrap
+                letras_row = vt_row + 1
+                try:
+                    ws_ppto.row_dimensions[letras_row].height = 30
+                except Exception:
+                    pass
+                for c in range(2, 7):
+                    try:
+                        cell = _set(ws_ppto, letras_row, c, ws_ppto.cell(row=letras_row, column=c).value)
+                        cell.alignment = XLAlign(horizontal='center', vertical='center', wrap_text=True)
+                        cell.border = box_border
+                    except Exception:
+                        pass
+
+            # Plazo de entrega (caja grande y número a la derecha)
+            plazo_row = _find_row_by_labels(ws_ppto, ['PLAZO DE ENTREGA', 'PLAZO DE ENTREGA: (DIAS'])
+            if plazo_row:
+                try:
+                    ws_ppto.row_dimensions[plazo_row].height = 22
+                except Exception:
+                    pass
+                for c in range(3, 6):
+                    try:
+                        cell = _set(ws_ppto, plazo_row, c, ws_ppto.cell(row=plazo_row, column=c).value)
+                        cell.font = bold_font
+                        cell.alignment = XLAlign(horizontal='center', vertical='center', wrap_text=True)
+                        cell.border = box_border
+                    except Exception:
+                        pass
+                try:
+                    # No reasignar el valor (para evitar sobrescribir el total si el rango está combinado);
+                    # solo aplicar formato al ancla existente
+                    num_cell = ws_ppto.cell(row=plazo_row, column=6)
+                    if isinstance(num_cell, MergedCell):
+                        num_cell = _anchor(ws_ppto, plazo_row, 6)
+                    num_cell.alignment = XLAlign(horizontal='center', vertical='center')
+                    num_cell.border = box_border
+                    num_cell.number_format = '0'
+                except Exception:
+                    pass
+
+            # Firma del representante legal: línea superior gruesa
+            firma_row = _find_row_by_labels(ws_ppto, ['FIRMA DEL REPRESENTANTE LEGAL'])
+            if firma_row:
+                try:
+                    ws_ppto.row_dimensions[firma_row].height = 18
+                except Exception:
+                    pass
+                for c in range(2, 7):
+                    try:
+                        cell = _set(ws_ppto, firma_row, c, ws_ppto.cell(row=firma_row, column=c).value)
+                        cell.alignment = XLAlign(horizontal='center', vertical='center')
+                        cell.border = XLBorder(top=medium)
+                    except Exception:
+                        pass
+
             dialog = QDialog(self)
             dialog.setWindowTitle("Insertar Ítem - Análisis Unitarios")
             dialog.resize(900, 600)
@@ -222,17 +331,27 @@ class PresupuestoView(QWidget):
     def create_buttons(self):
         """Crea un conjunto compacto de menús por categoría para reducir saturación visual."""
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(8)
+        button_layout.setContentsMargins(0, 0, 0, 0)
         
         # Helper para crear botones-menú
         def make_menu_button(title: str, items: list[tuple[str, callable]]):
             btn = QToolButton(self)
             btn.setText(title)
             btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             menu = QMenu(btn)
             for text, slot in items:
                 act = QAction(text, self)
                 act.triggered.connect(slot)
                 menu.addAction(act)
+            # Asegurar que el menú cubra exactamente el ancho del botón al abrirse
+            def _resize_menu_to_button():
+                try:
+                    menu.setFixedWidth(btn.width())
+                except Exception:
+                    pass
+            menu.aboutToShow.connect(_resize_menu_to_button)
             btn.setMenu(menu)
             return btn
         
@@ -261,14 +380,14 @@ class PresupuestoView(QWidget):
             ("Importar CSV", self.import_csv),
             ("Importar por Texto", self.open_import_text_dialog),
             ("Exportar CSV", self.export_csv),
+            ("Exportar Excel (.xlsx)", self.export_excel),
         ])
         
         # Añadir en orden lógico
-        button_layout.addWidget(btn_capitulos)
-        button_layout.addWidget(btn_items)
-        button_layout.addWidget(btn_analisis)
-        button_layout.addWidget(btn_io)
-        button_layout.addStretch(1)
+        button_layout.addWidget(btn_capitulos, 1)
+        button_layout.addWidget(btn_items, 1)
+        button_layout.addWidget(btn_analisis, 1)
+        button_layout.addWidget(btn_io, 1)
         
         self.layout.addLayout(button_layout)
 
@@ -1129,6 +1248,786 @@ class PresupuestoView(QWidget):
                 writer.writerow(["TOTAL PRESUPUESTO", f"{self.direct_cost_total}"])
 
         QMessageBox.information(self, "Exportado", "El presupuesto y el desglose AIU se han exportado a CSV.")
+
+    def export_excel(self):
+        """
+        Exporta al archivo Excel usando la plantilla 'FORMATO EXPORTACION.xlsx' existente en la raíz.
+        Llena cuatro hojas:
+          - PRESUPUESTO: equivalente a la tabla de presupuesto con capítulos y subtotales
+          - AIU: desglose de costos indirectos si está disponible
+          - ANALISIS UNITARIOS: lista de análisis del presupuesto con totales actuales
+          - INSUMOS: todos los recursos de los análisis incluidos, agrupados
+        """
+        try:
+            # Seleccionar destino
+            filePath, _ = QFileDialog.getSaveFileName(self, "Exportar Excel", "", "Excel (*.xlsx)")
+            if not filePath:
+                return
+            template_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "FORMATO EXPORTACION.xlsx"))
+            if not os.path.exists(template_path):
+                QMessageBox.critical(self, "Plantilla no encontrada", f"No se encontró la plantilla: {template_path}")
+                return
+
+            # Cargar plantilla
+            wb = load_workbook(template_path)
+
+            # Obtener hojas (tolerante a nombres)
+            def _get_ws(*candidates):
+                for name in candidates:
+                    if name in wb.sheetnames:
+                        return wb[name]
+                return wb.active
+
+            ws_ppto = _get_ws("PRESUPUESTO", "Presupuesto")
+            ws_aiu = _get_ws("AIU", "Aiu")
+            ws_au = _get_ws("ANALISIS", "Analisis", "ANALISIS UNITARIOS", "Analisis Unitarios", "Análisis Unitarios")
+            ws_ins = _get_ws("INSUMOS", "Insumos")
+
+            # Helpers para celdas combinadas
+            def _anchor(sheet, r, c):
+                cell = sheet.cell(row=r, column=c)
+                if isinstance(cell, MergedCell):
+                    for cr in sheet.merged_cells.ranges:
+                        if cr.min_row <= r <= cr.max_row and cr.min_col <= c <= cr.max_col:
+                            return sheet.cell(row=cr.min_row, column=cr.min_col)
+                return cell
+
+            def _set(sheet, r, c, value):
+                cell = sheet.cell(row=r, column=c)
+                try:
+                    cell.value = value
+                    return cell
+                except Exception:
+                    # Si es una celda combinada, escribir en el ancla
+                    base = _anchor(sheet, r, c)
+                    try:
+                        base.value = value
+                    except Exception:
+                        pass
+                    return base
+
+            # Conversor simple de números a letras en español (enteros hasta billones)
+            def _num_a_letras_es(n: int) -> str:
+                unidades = ["CERO","UNO","DOS","TRES","CUATRO","CINCO","SEIS","SIETE","OCHO","NUEVE",
+                            "DIEZ","ONCE","DOCE","TRECE","CATORCE","QUINCE","DIECISEIS","DIECISIETE","DIECIOCHO","DIECINUEVE"]
+                decenas = ["","DIEZ","VEINTE","TREINTA","CUARENTA","CINCUENTA","SESENTA","SETENTA","OCHENTA","NOVENTA"]
+                centenas = ["","CIENTO","DOSCIENTOS","TRESCIENTOS","CUATROCIENTOS","QUINIENTOS","SEISCIENTOS","SETECIENTOS","OCHOCIENTOS","NOVECIENTOS"]
+                def _tres(x: int) -> str:
+                    if x == 0:
+                        return ""
+                    if x == 100:
+                        return "CIEN"
+                    c = x // 100
+                    d = (x % 100) // 10
+                    u = x % 10
+                    resto = x % 100
+                    res = []
+                    if c:
+                        res.append(centenas[c])
+                    if resto <= 19:
+                        if resto:
+                            res.append(unidades[resto])
+                        return " ".join([r for r in res if r])
+                    if d == 2:
+                        if u == 0:
+                            res.append("VEINTE")
+                        else:
+                            res.append("VEINTI" + ("UN" if u == 1 else unidades[u].lower()))
+                        return " ".join([r for r in res if r])
+                    if d >= 3:
+                        res.append(decenas[d])
+                        if u:
+                            res.append("Y")
+                            res.append("UN" if u == 1 else unidades[u])
+                        return " ".join([r for r in res if r])
+                    return " ".join([r for r in res if r])
+                if n == 0:
+                    return "CERO"
+                partes = []
+                billones = n // 1_000_000_000_000
+                n %= 1_000_000_000_000
+                miles_mill = n // 1_000_000_000
+                n %= 1_000_000_000
+                millones = n // 1_000_000
+                n %= 1_000_000
+                miles = n // 1000
+                resto = n % 1000
+                if billones:
+                    partes.append(_tres(billones))
+                    partes.append("BILLONES" if billones > 1 else "BILLON")
+                if miles_mill:
+                    partes.append(_tres(miles_mill))
+                    partes.append("MIL MILLONES")
+                if millones:
+                    partes.append(_tres(millones))
+                    partes.append("MILLONES" if millones > 1 else "MILLON")
+                if miles:
+                    if miles == 1:
+                        partes.append("MIL")
+                    else:
+                        partes.append(_tres(miles))
+                        partes.append("MIL")
+                if resto:
+                    partes.append(_tres(resto))
+                # Ajustes UN/UNO
+                txt = " ".join([p for p in partes if p]).replace(" UNO MIL"," UN MIL").replace(" UNO MILLON"," UN MILLON").replace(" UNO MILLONES"," UN MILLONES")
+                txt = " ".join(txt.split())
+                return txt
+
+            # -------- PRESUPUESTO --------
+            # Buscar header donde dice ITEM
+            header_row = None
+            for r in range(1, ws_ppto.max_row + 1):
+                v = ws_ppto.cell(row=r, column=1).value
+                if isinstance(v, str) and v.strip().upper() == "ITEM":
+                    header_row = r
+                    break
+            if header_row is None:
+                header_row = 8
+            data_row = header_row + 1
+
+            # Guardar solo la información de merges (evitar copiar estilos para prevenir StyleProxy issues)
+            def _row_style(sheet, r, cols=6):
+                merges = []
+                for cr in sheet.merged_cells.ranges:
+                    if cr.min_row == r and cr.max_row == r and cr.min_col <= 6:
+                        merges.append((cr.min_col, cr.max_col))
+                return None, merges
+
+            cap_style, cap_merges = _row_style(ws_ppto, data_row)
+            item_style, item_merges = _row_style(ws_ppto, data_row + 1)
+            sub_style, sub_merges = _row_style(ws_ppto, data_row + 2)
+
+            def _apply_style(sheet, r, snap, merges):
+                # Solo aplicar merges para imitar el formato de fila sin copiar estilos
+                for mc, xc in merges:
+                    try:
+                        sheet.merge_cells(start_row=r, start_column=mc, end_row=r, end_column=xc)
+                    except Exception:
+                        pass
+
+            # Limpiar bloque de datos actual: borrar filas de datos sin tocar el resumen
+            # Buscar ancla del bloque de resumen por varias palabras clave
+            def _find_anchor_row(sheet):
+                # Priorizar el inicio real del bloque de totales
+                priority = ["COSTOS INDIRECTOS"]
+                fallback = ["VALOR COSTO", "COSTO DIRECTO", "TOTAL PRESUPUESTO", "FIRMA"]
+                max_c = min(12, sheet.max_column or 12)
+                # Búsqueda prioritaria
+                for r in range(data_row, sheet.max_row + 1):
+                    for c in range(1, max_c + 1):
+                        v = sheet.cell(row=r, column=c).value
+                        if isinstance(v, str) and any(k in v.upper() for k in priority):
+                            return r
+                # Fallback
+                max_c = min(12, sheet.max_column or 12)
+                for r in range(data_row, sheet.max_row + 1):
+                    for c in range(1, max_c + 1):
+                        v = sheet.cell(row=r, column=c).value
+                        if isinstance(v, str) and any(k in v.upper() for k in fallback):
+                            return r
+                return None
+
+            totals_anchor = _find_anchor_row(ws_ppto)
+            if totals_anchor and totals_anchor > data_row:
+                try:
+                    ws_ppto.delete_rows(data_row, totals_anchor - data_row)
+                except Exception:
+                    pass
+
+            # Construir capítulos desde la tabla
+            chapters = []
+            current = None
+            for tr in range(self.table.rowCount()):
+                it0 = self.table.item(tr, 0)
+                if not it0:
+                    continue
+                role = it0.data(Qt.ItemDataRole.UserRole)
+                if role == 'chapter':
+                    if current:
+                        chapters.append(current)
+                    text = it0.text()
+                    try:
+                        num, name = text.split('.', 1)
+                        num = num.strip()
+                        name = name.strip()
+                    except Exception:
+                        num = str(len(chapters) + 1)
+                        name = text
+                    current = { 'num': num, 'name': name, 'items': [], 'subtotal': 0.0 }
+                elif role == 'subtotal':
+                    val_txt = self.table.item(tr, 5).text() if self.table.item(tr, 5) else "0"
+                    try:
+                        st = float(str(val_txt).replace('$','').replace(',',''))
+                    except Exception:
+                        st = 0.0
+                    if current:
+                        current['subtotal'] = st
+                else:
+                    if current is None:
+                        continue
+                    def _txt(c):
+                        x = self.table.item(tr, c)
+                        return x.text() if x else ""
+                    def _num(c):
+                        t = (_txt(c) or '').replace('$','').replace(' ','').replace(',','')
+                        try:
+                            return float(t)
+                        except Exception:
+                            return 0.0
+                    current['items'].append({
+                        'item': it0.text(),
+                        'desc': _txt(1),
+                        'und': (_txt(2) or '').upper(),
+                        'qty': _num(3),
+                        'cu': _num(4),
+                        'ct': _num(5),
+                    })
+            if current:
+                chapters.append(current)
+
+            # Estilos para capítulo y subtotal (subrayado)
+            chap_fill = XLFill(fill_type='solid', start_color='FFEFEFEF', end_color='FFEFEFEF')
+            chap_font = XLFont(bold=True)
+            side_thin = XLSide(style='thin', color='FFAAAAAA')
+            side_med = XLSide(style='medium', color='FF000000')
+            def _set_row_bottom_border(sheet, row_idx, left=2, right=6, border_side=None):
+                for c in range(left, right + 1):
+                    try:
+                        cell = _set(sheet, row_idx, c, sheet.cell(row=row_idx, column=c).value)
+                        cell.border = XLBorder(left=side_thin, right=side_thin, top=side_thin, bottom=(border_side or side_med))
+                    except Exception:
+                        pass
+
+            rptr = data_row
+            for ch in chapters:
+                ws_ppto.insert_rows(rptr, 1)
+                _apply_style(ws_ppto, rptr, cap_style, cap_merges)
+                try:
+                    ws_ppto.merge_cells(start_row=rptr, start_column=2, end_row=rptr, end_column=6)
+                except Exception:
+                    pass
+                _set(ws_ppto, rptr, 1, ch['num'])
+                _set(ws_ppto, rptr, 2, f"CAP {ch['num']}  {ch['name']}")
+                # Estilo de capítulo: fondo y subrayado (borde inferior)
+                try:
+                    for c in range(1, 7):
+                        cell = ws_ppto.cell(row=rptr, column=c)
+                        cell.fill = chap_fill
+                        cell.font = chap_font
+                        if c == 2:
+                            cell.alignment = XLAlign(horizontal='left', vertical='center')
+                        cell.border = XLBorder(left=side_thin, right=side_thin, top=side_thin, bottom=side_med)
+                    ws_ppto.row_dimensions[rptr].height = 18
+                except Exception:
+                    pass
+                rptr += 1
+                for it in ch['items']:
+                    ws_ppto.insert_rows(rptr, 1)
+                    _apply_style(ws_ppto, rptr, item_style, item_merges)
+                    _set(ws_ppto, rptr, 1, it['item'])
+                    _set(ws_ppto, rptr, 2, it['desc'])
+                    _set(ws_ppto, rptr, 3, it['und'])
+                    _set(ws_ppto, rptr, 4, it['qty'])
+                    _set(ws_ppto, rptr, 5, it['cu'])
+                    _set(ws_ppto, rptr, 6, it['ct'])
+                    # bordes suaves laterales
+                    try:
+                        for c in range(1,7):
+                            cell = ws_ppto.cell(row=rptr, column=c)
+                            cell.border = XLBorder(left=side_thin, right=side_thin)
+                        ws_ppto.row_dimensions[rptr].height = 18
+                    except Exception:
+                        pass
+                    rptr += 1
+                ws_ppto.insert_rows(rptr, 1)
+                _apply_style(ws_ppto, rptr, sub_style, sub_merges)
+                try:
+                    ws_ppto.merge_cells(start_row=rptr, start_column=2, end_row=rptr, end_column=5)
+                except Exception:
+                    pass
+                _set(ws_ppto, rptr, 2, f"SUBTOTAL CAP {ch['num']}  {ch['name']}: ")
+                _set(ws_ppto, rptr, 6, ch['subtotal'])
+                # Estilo de subtotal: negrita y borde superior grueso
+                try:
+                    for c in range(1,7):
+                        cell = ws_ppto.cell(row=rptr, column=c)
+                        cell.font = chap_font
+                        cell.border = XLBorder(top=side_med, left=side_thin, right=side_thin)
+                        if c == 2:
+                            cell.alignment = XLAlign(horizontal='right', vertical='center')
+                        if c == 6:
+                            cell.number_format = '#,##0.00'
+                    ws_ppto.row_dimensions[rptr].height = 18
+                except Exception:
+                    pass
+                rptr += 1
+                # Separación entre tablas de capítulos
+                rptr += 1
+
+            # Encontrar y mover la fila "VALOR COSTOS DIRECTOS" a la posición correcta
+            try:
+                # Buscar la fila que contiene "VALOR COSTOS DIRECTOS"
+                vcd_row = None
+                for row in range(1, ws_ppto.max_row + 1):
+                    for col in range(1, ws_ppto.max_column + 1):
+                        try:
+                            cell_value = ws_ppto.cell(row=row, column=col).value
+                            if cell_value and isinstance(cell_value, str):
+                                if 'VALOR COSTOS DIRECTOS' in cell_value.upper():
+                                    if 'COSTOS INDIRECTOS' not in cell_value.upper():  # No tocar "COSTOS INDIRECTOS"
+                                        vcd_row = row
+                                        break
+                        except Exception:
+                            continue
+                    if vcd_row:
+                        break
+                
+                # Si encontramos la fila, copiar su contenido a la posición correcta y limpiar la original
+                if vcd_row and vcd_row != rptr:
+                    # Copiar todo el contenido de la fila original a la nueva posición
+                    for col in range(1, ws_ppto.max_column + 1):
+                        try:
+                            original_cell = ws_ppto.cell(row=vcd_row, column=col)
+                            new_cell = ws_ppto.cell(row=rptr, column=col)
+                            new_cell.value = original_cell.value
+                            if original_cell.has_style:
+                                new_cell.font = original_cell.font
+                                new_cell.fill = original_cell.fill
+                                new_cell.border = original_cell.border
+                                new_cell.alignment = original_cell.alignment
+                                new_cell.number_format = original_cell.number_format
+                        except Exception:
+                            continue
+                    
+                    # Limpiar la fila original
+                    for col in range(1, ws_ppto.max_column + 1):
+                        try:
+                            ws_ppto.cell(row=vcd_row, column=col).value = None
+                        except Exception:
+                            continue
+                    
+                    # Actualizar el valor con el costo directo correcto
+                    _set(ws_ppto, rptr, 6, direct_cost)
+                    
+                    # Asegurar altura de fila
+                    try:
+                        ws_ppto.row_dimensions[rptr].height = 18
+                    except Exception:
+                        pass
+                else:
+                    # Si no se encontró, crear desde cero
+                    _set(ws_ppto, rptr, 2, 'VALOR COSTOS DIRECTOS')
+                    _set(ws_ppto, rptr, 6, direct_cost)
+                    try:
+                        ws_ppto.merge_cells(start_row=rptr, start_column=2, end_row=rptr, end_column=5)
+                    except Exception:
+                        pass
+                    # Estilo
+                    try:
+                        for c in range(2,7):
+                            cell = ws_ppto.cell(row=rptr, column=c)
+                            cell.font = XLFont(bold=True)
+                            cell.alignment = XLAlign(horizontal='right' if c==2 else 'center', vertical='center')
+                            if c == 6:
+                                cell.number_format = '#,##0.00'
+                        ws_ppto.row_dimensions[rptr].height = 18
+                    except Exception:
+                        pass
+                
+                # Asegurar que "COSTOS INDIRECTOS" esté en la siguiente fila
+                summary_anchor = rptr + 1
+                # Buscar si ya existe "COSTOS INDIRECTOS" en la fila siguiente
+                costos_exists = False
+                try:
+                    for col in range(1, ws_ppto.max_column + 1):
+                        cell_value = ws_ppto.cell(row=summary_anchor, column=col).value
+                        if cell_value and isinstance(cell_value, str) and 'COSTOS INDIRECTOS' in cell_value.upper():
+                            costos_exists = True
+                            break
+                except Exception:
+                    pass
+                
+                if not costos_exists:
+                    _set(ws_ppto, summary_anchor, 2, 'COSTOS INDIRECTOS')
+                    try:
+                        ws_ppto.merge_cells(start_row=summary_anchor, start_column=2, end_row=summary_anchor, end_column=6)
+                    except Exception:
+                        pass
+                    try:
+                        cell = ws_ppto.cell(row=summary_anchor, column=2)
+                        cell.font = XLFont(bold=True)
+                        cell.fill = XLFill(fill_type='solid', start_color='FFEFEFEF', end_color='FFEFEFEF')
+                        cell.alignment = XLAlign(horizontal='left', vertical='center')
+                        ws_ppto.row_dimensions[summary_anchor].height = 18
+                    except Exception:
+                        pass
+                        
+            except Exception:
+                pass
+
+            # Escribir totales buscando por sinónimos si es necesario
+            import unicodedata
+            def _norm(s: str) -> str:
+                s = unicodedata.normalize('NFKD', s)
+                s = ''.join(ch for ch in s if not unicodedata.combining(ch))
+                return s.upper()
+
+            def _write_by_keywords(sheet, labels: list[str], value, col=6):
+                labels_n = [_norm(x) for x in labels]
+                for rr in range(1, sheet.max_row + 1):
+                    for cc in range(1, min(12, sheet.max_column or 12) + 1):
+                        v = sheet.cell(row=rr, column=cc).value
+                        if not isinstance(v, str):
+                            continue
+                        up = _norm(v)
+                        if any(lbl in up for lbl in labels_n):
+                            cell = _set(sheet, rr, col, value)
+                            return True
+                return False
+
+            def _write_all_by_keywords(sheet, labels: list[str], value, col=6):
+                """Escribe en TODAS las coincidencias de etiquetas en la columna indicada."""
+                labels_n = [_norm(x) for x in labels]
+                wrote = False
+                for rr in range(1, sheet.max_row + 1):
+                    for cc in range(1, min(12, sheet.max_column or 12) + 1):
+                        v = sheet.cell(row=rr, column=cc).value
+                        if not isinstance(v, str):
+                            continue
+                        up = _norm(v)
+                        if any(lbl in up for lbl in labels_n):
+                            cell = _set(sheet, rr, col, value)
+                            wrote = True
+                return wrote
+
+            def _find_label_rows(sheet, labels: list[str]):
+                rows = []
+                labels_n = [_norm(x) for x in labels]
+                for rr in range(1, sheet.max_row + 1):
+                    for cc in range(1, min(12, sheet.max_column or 12) + 1):
+                        v = sheet.cell(row=rr, column=cc).value
+                        if isinstance(v, str) and any(lbl in _norm(v) for lbl in labels_n):
+                            rows.append(rr)
+                            break
+                return rows
+
+            def _write_last_by_keywords(sheet, labels: list[str], value, col=6):
+                rows = _find_label_rows(sheet, labels)
+                if not rows:
+                    return False
+                target_row = max(rows)
+                _set(sheet, target_row, col, value)
+                return True
+
+            # Escribir líneas de resumen con % en col 5 y valor en col 6
+            def _write_summary_line(sheet, labels: list[str], pct_value: float, amount_value: float, pct_col=5, val_col=6, bold=False):
+                labels_n = [_norm(x) for x in labels]
+                for rr in range(1, sheet.max_row + 1):
+                    for cc in range(1, min(12, sheet.max_column or 12) + 1):
+                        v = sheet.cell(row=rr, column=cc).value
+                        if not isinstance(v, str):
+                            continue
+                        up = _norm(v)
+                        if any(lbl in up for lbl in labels_n):
+                            pct_cell = _set(sheet, rr, pct_col, None)
+                            val_cell = _set(sheet, rr, val_col, None)
+                            # Porcentajes se escriben como 0-1 con formato 0.00%
+                            try:
+                                pct_cell.value = (pct_value or 0.0) / 100.0
+                                pct_cell.number_format = '0.00%'
+                            except Exception:
+                                pct_cell.value = pct_value
+                            try:
+                                val_cell.value = amount_value or 0.0
+                                val_cell.number_format = '#,##0.00'
+                            except Exception:
+                                val_cell.value = amount_value
+                            if bold:
+                                try:
+                                    bf = XLFont(bold=True)
+                                    pct_cell.font = bf
+                                    val_cell.font = bf
+                                except Exception:
+                                    pass
+                            return True
+                return False
+
+            direct_cost = getattr(self, 'direct_cost_total', 0.0)
+            admin_total = getattr(self, 'admin_cost_total', 0.0)
+            # VALOR COSTOS DIRECTOS ya se escribió arriba después del último capítulo
+
+            # Desglose en resumen del Presupuesto (ADMIN/IMPREV/UTIL/TOTAL AIU/IVA)
+            bd = getattr(self, 'aiu_breakdown', None)
+            admin_val = bd.get('admin', 0.0) if bd else 0.0
+            imprev_val = bd.get('imprev', 0.0) if bd else 0.0
+            util_val = bd.get('util', 0.0) if bd else 0.0
+            iva_val = bd.get('iva', 0.0) if bd else 0.0
+            admin_pct = (admin_val / direct_cost * 100.0) if direct_cost > 0 else 0.0
+            imprev_pct = (bd.get('imprev_pct', 0.0) if bd else 0.0)
+            util_pct = (bd.get('util_pct', 0.0) if bd else 0.0)
+            iva_pct = (bd.get('iva_pct', 19.0) if bd else 0.0)
+            aiu_sin_iva_val = admin_val + imprev_val + util_val
+            aiu_total_val = aiu_sin_iva_val + iva_val
+            aiu_sin_iva_pct = (aiu_sin_iva_val / direct_cost * 100.0) if direct_cost > 0 else (admin_pct + imprev_pct + util_pct)
+            aiu_pct_total = (aiu_total_val / direct_cost * 100.0) if direct_cost > 0 else (aiu_sin_iva_pct + iva_pct)
+
+            rows_to_uniform = []
+            for lbls, pct, val, bold in [
+                (['ADMINISTRACION', 'ADMINISTRACIÓN'], admin_pct, admin_val, False),
+                (['IMPREVISTOS'], imprev_pct, imprev_val, False),
+                (['UTILIDAD'], util_pct, util_val, False),
+                # TOTAL AIU (solo AIU sin IVA)
+                (['TOTAL AIU'], aiu_sin_iva_pct, aiu_sin_iva_val, True),
+                (['COSTOS INDIRECTOS'], aiu_pct_total, aiu_total_val, True),
+                (['IVA SOBRE LA UTILIDAD', 'IVA UTILIDAD'], iva_pct, iva_val, False),
+            ]:
+                # registrar fila usada por cada escritura
+                labels_n = [_norm(x) for x in lbls]
+                used_row = None
+                for rr in range(1, ws_ppto.max_row + 1):
+                    found = False
+                    for cc in range(1, min(12, ws_ppto.max_column or 12) + 1):
+                        v = ws_ppto.cell(row=rr, column=cc).value
+                        if isinstance(v, str) and any(l in _norm(v) for l in labels_n):
+                            used_row = rr
+                            found = True
+                            break
+                    if found:
+                        break
+                _write_summary_line(ws_ppto, lbls, pct, val, bold=bold)
+                if used_row:
+                    rows_to_uniform.append(used_row)
+
+            # Uniformar altura de filas en el bloque de resumen (incluye fila 23 solicitada)
+            try:
+                for rr in rows_to_uniform + [23]:
+                    ws_ppto.row_dimensions[rr].height = 18
+            except Exception:
+                pass
+
+            _write_last_by_keywords(ws_ppto, ['VALOR TOTAL PRESUPUESTO', 'VALOR COSTO TOTAL', 'TOTAL PRESUPUESTO'], direct_cost + admin_total)
+
+            # Reemplazar valor por fórmula que sume las filas del propio resumen (Directo + Total AIU + IVA)
+            try:
+                # Buscar la tabla de resumen correcta (la última sección que tenga la etiqueta "COSTOS INDIRECTOS")
+                costos_rows = _find_label_rows(ws_ppto, ['COSTOS INDIRECTOS'])
+                vcd_rows = _find_label_rows(ws_ppto, ['VALOR COSTOS DIRECTOS', 'VALOR COSTO DIRECTO', 'COSTO DIRECTO'])
+                total_aiu_rows = _find_label_rows(ws_ppto, ['TOTAL AIU'])
+                iva_rows = _find_label_rows(ws_ppto, ['IVA SOBRE LA UTILIDAD', 'IVA UTILIDAD'])
+                total_rows = _find_label_rows(ws_ppto, ['VALOR TOTAL PRESUPUESTO', 'VALOR COSTO TOTAL', 'TOTAL PRESUPUESTO'])
+                if costos_rows and vcd_rows and total_aiu_rows and iva_rows and total_rows:
+                    base = max(costos_rows)  # ancla del bloque final
+                    # Seleccionar filas posteriores a la ancla para evitar líneas intermedias
+                    vcd_candidates = [r for r in vcd_rows if r > base]
+                    taiu_candidates = [r for r in total_aiu_rows if r > base]
+                    iva_candidates = [r for r in iva_rows if r > base]
+                    total_candidates = [r for r in total_rows if r > base]
+                    if vcd_candidates and taiu_candidates and iva_candidates and total_candidates:
+                        vcd_r = min(vcd_candidates)
+                        taiu_r = min(taiu_candidates)
+                        iva_r = min(iva_candidates)
+                        tot_r = min(total_candidates)
+                        # Fórmula en la columna 6 (F) del total
+                        cell = _set(ws_ppto, tot_r, 6, f"=F{vcd_r}+F{taiu_r}+F{iva_r}")
+                        try:
+                            cell.number_format = '#,##0.00'
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            # Escribir valor en letras: siempre en la fila inmediatamente debajo de
+            # la etiqueta "VALOR  TOTAL PRESUPUESTO"
+            try:
+                vt_rows = _find_label_rows(ws_ppto, ['VALOR  TOTAL PRESUPUESTO', 'VALOR TOTAL PRESUPUESTO'])
+                if vt_rows:
+                    target_row = max(vt_rows) + 1
+                    total_entero = int(round(direct_cost + admin_total))
+                    letras = _num_a_letras_es(total_entero)
+                    target_c = 2
+                    _set(ws_ppto, target_row, target_c, letras)
+                    for c in range(target_c, min(target_c + 4, ws_ppto.max_column + 1)):
+                        try:
+                            ws_ppto.cell(row=target_row, column=c).alignment = XLAlign(horizontal='left', vertical='center', wrap_text=True)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            # -------- AIU --------
+            if bd:
+                _write_all_by_keywords(ws_aiu, ['VALOR COSTO DIRECTO', 'COSTO DIRECTO'], direct_cost)
+                _write_summary_line(ws_aiu, ['ADMINISTRACION', 'ADMINISTRACIÓN'], admin_pct, admin_val)
+                _write_summary_line(ws_aiu, ['IMPREVISTOS'], imprev_pct, imprev_val)
+                _write_summary_line(ws_aiu, ['UTILIDAD'], util_pct, util_val)
+                _write_summary_line(ws_aiu, ['IVA SOBRE LA UTILIDAD', 'IVA UTILIDAD'], iva_pct, iva_val)
+                _write_summary_line(ws_aiu, ['TOTAL AIU', 'COSTOS INDIRECTOS'], aiu_pct_total, aiu_total_val, bold=True)
+                _write_all_by_keywords(ws_aiu, ['VALOR COSTO TOTAL', 'TOTAL PRESUPUESTO'], direct_cost + bd.get('total_aiu', 0.0))
+
+            # -------- ANALISIS UNITARIOS --------
+            # Limpiar cuerpo debajo de header (si existe) y construir una tabla por cada análisis
+            header_row_au = 1
+            for r in range(1, ws_au.max_row + 1):
+                v = ws_au.cell(row=r, column=1).value
+                if isinstance(v, str) and v.strip().upper() in ("CODIGO", "CÓDIGO", "ANALISIS", "ANÁLISIS"):
+                    header_row_au = r
+                    break
+            try:
+                ws_au.delete_rows(header_row_au + 1, max(ws_au.max_row - header_row_au, 0))
+            except Exception:
+                pass
+
+            # Extraer análisis únicos desde la tabla de presupuesto
+            seen = set()
+            analyses = []
+            for r in range(self.table.rowCount()):
+                it0 = self.table.item(r, 0)
+                if not it0:
+                    continue
+                role = it0.data(Qt.ItemDataRole.UserRole)
+                if role in (None, '', 'chapter', 'subtotal'):
+                    continue
+                code = role
+                if code in seen:
+                    continue
+                seen.add(code)
+                desc = self.table.item(r, 1).text() if self.table.item(r, 1) else ''
+                und = self.table.item(r, 2).text() if self.table.item(r, 2) else ''
+                analyses.append((code, desc, und))
+
+            # Estilos básicos (sin StyleProxy) y ajuste de columnas
+            title_font = XLFont(bold=True, size=12)
+            header_font = XLFont(bold=True)
+            center = XLAlign(horizontal='center', vertical='center', wrap_text=True)
+            left = XLAlign(horizontal='left', vertical='center', wrap_text=True)
+            num_fmt = '#,##0.00'
+            header_fill = XLFill('solid', start_color='FFEFEFEF', end_color='FFEFEFEF')
+            thin = XLSide(style='thin', color='FF999999')
+            border = XLBorder(left=thin, right=thin, top=thin, bottom=thin)
+
+            try:
+                ws_au.column_dimensions['A'].width = 16
+                ws_au.column_dimensions['B'].width = 60
+                ws_au.column_dimensions['C'].width = 10
+                ws_au.column_dimensions['D'].width = 12
+                ws_au.column_dimensions['E'].width = 14
+                ws_au.column_dimensions['F'].width = 16
+            except Exception:
+                pass
+
+            rptr = header_row_au + 1
+            from models.database import SessionLocal as _Sess
+            _session = _Sess()
+            try:
+                for code, desc, und in analyses:
+                    # Título del análisis (merge A..F)
+                    _set(ws_au, rptr, 1, f"{code} - {desc}")
+                    try:
+                        ws_au.merge_cells(start_row=rptr, start_column=1, end_row=rptr, end_column=6)
+                    except Exception:
+                        pass
+                    for c in range(1, 7):
+                        cell = ws_au.cell(row=rptr, column=c)
+                        cell.font = title_font
+                        cell.alignment = left
+                    rptr += 1
+
+                    # Header de la tabla de recursos
+                    headers = ["CÓDIGO", "DESCRIPCIÓN", "UND", "CANT.", "VR. UNIT", "VR. TOTAL"]
+                    for c, h in enumerate(headers, start=1):
+                        cell = ws_au.cell(row=rptr, column=c, value=h)
+                        cell.font = header_font
+                        cell.fill = header_fill
+                        cell.alignment = center
+                        cell.border = border
+                    rptr += 1
+
+                    # Filas de recursos
+                    total_parcial = 0.0
+                    q = _session.query(AnalisisUnitarioRecurso).filter_by(codigo_analisis=code).all()
+                    if not q:
+                        # Fila vacía para indicar sin datos
+                        ws_au.cell(row=rptr, column=1, value="(sin recursos)").alignment = left
+                        rptr += 1
+                    else:
+                        for rec in q:
+                            cant = float(rec.cantidad_recurso or 0)
+                            desper = float(rec.desper or 0)
+                            vr_unit = float(rec.vr_unitario or 0)
+                            vr_parc = cant * (1 + desper) * vr_unit
+                            total_parcial += vr_parc
+                            values = [
+                                rec.codigo_recurso,
+                                rec.descripcion_recurso,
+                                rec.unidad_recurso,
+                                cant,
+                                vr_unit,
+                                vr_parc
+                            ]
+                            for c, val in enumerate(values, start=1):
+                                cell = ws_au.cell(row=rptr, column=c, value=val)
+                                if c in (1,2):
+                                    cell.alignment = left
+                                else:
+                                    cell.alignment = center
+                                if c in (4,5,6):
+                                    cell.number_format = num_fmt
+                                cell.border = border
+                            rptr += 1
+
+                    # Subtotal del análisis
+                    try:
+                        ws_au.merge_cells(start_row=rptr, start_column=1, end_row=rptr, end_column=5)
+                    except Exception:
+                        pass
+                    st_cell = ws_au.cell(row=rptr, column=1, value=f"SUBTOTAL {code}:")
+                    st_cell.font = header_font
+                    st_cell.alignment = left
+                    val_cell = ws_au.cell(row=rptr, column=6, value=total_parcial)
+                    val_cell.number_format = num_fmt
+                    val_cell.font = header_font
+                    rptr += 2  # una fila en blanco entre tablas
+            finally:
+                _session.close()
+
+            # -------- INSUMOS --------
+            # Limpiar cuerpo debajo del header (buscar 'CODIGO RECURSO')
+            header_row_ins = 1
+            for r in range(1, ws_ins.max_row + 1):
+                v = ws_ins.cell(row=r, column=1).value
+                if isinstance(v, str) and 'CODIGO' in v.upper():
+                    header_row_ins = r
+                    break
+            ws_ins.delete_rows(header_row_ins + 1, ws_ins.max_row - header_row_ins)
+
+            # Consultar BD para traer recursos de cada análisis incluido
+            from models.database import SessionLocal
+            session = SessionLocal()
+            try:
+                rptr = header_row_ins + 1
+                for code, _, _ in analyses:
+                    # insertar encabezado
+                    _set(ws_ins, rptr, 1, f"=== {code} ===")
+                    rptr += 1
+                    q = session.query(AnalisisUnitarioRecurso).filter_by(codigo_analisis=code).all()
+                    for rec in q:
+                        _set(ws_ins, rptr, 1, rec.codigo_recurso)
+                        _set(ws_ins, rptr, 2, rec.descripcion_recurso)
+                        _set(ws_ins, rptr, 3, rec.unidad_recurso)
+                        _set(ws_ins, rptr, 4, rec.cantidad_recurso)
+                        _set(ws_ins, rptr, 5, rec.desper)
+                        _set(ws_ins, rptr, 6, rec.vr_unitario)
+                        _set(ws_ins, rptr, 7, rec.vr_parcial)
+                        rptr += 1
+            finally:
+                session.close()
+
+            # Guardar salida
+            wb.save(filePath)
+            QMessageBox.information(self, "Exportado", "Se generó el archivo Excel con el formato de la plantilla.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error al exportar", f"{e}")
 
     def import_csv(self):
         """Importa datos desde un archivo CSV al presupuesto y calcula automáticamente los totales."""

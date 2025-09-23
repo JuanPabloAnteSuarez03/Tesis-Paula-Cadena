@@ -856,6 +856,7 @@ class AdministracionWindow(QDialog):
         if not getattr(self, 'embedded', False):
             self.accept()
 
+
     def _reload_based_on_checkbox(self):
         if self.include_chk.isChecked():
             self._load_profesionales(only_necess=True)
