@@ -1,6 +1,6 @@
 # controllers/recursos_por_analisis_controller.py
 import traceback
-from PyQt6.QtCore import QObject
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from PyQt6.QtWidgets import QMessageBox, QDialog, QVBoxLayout, QPushButton
 from PyQt6.QtGui import QStandardItem
 from models.analisis_unitario_recurso import AnalisisUnitarioRecurso
@@ -10,19 +10,35 @@ from models.recurso import Recurso
 from views.recursos_por_analisis_view import RecursosPorAnalisisView
 
 class RecursosPorAnalisisController(QObject):
-    def __init__(self, codigo_analisis, parent=None):
+    # Señal que se emite cuando el análisis ha sido actualizado en la BD.
+    analysis_updated = pyqtSignal()
+    # Nueva señal: emite (codigo_analisis, nuevo_total) cuando cambia el total por ediciones en la tabla
+    analysis_total_changed = pyqtSignal(str, float)
+    
+    def __init__(self, codigo_analisis, parent=None, embed_readonly: bool = False):
         super().__init__(parent)
         self.codigo_analisis = codigo_analisis
+        self.embed_readonly = bool(embed_readonly)
         print(f"[DEBUG] Iniciando RecursosPorAnalisisController para análisis: {codigo_analisis}")
-        self.view = RecursosPorAnalisisView(codigo_analisis)
+        # Si está embebido en la vista de Análisis del Presupuesto, ocultamos el formulario
+        # y mostramos todas las filas completas (sin scroll interno)
+        # En modo embed_readonly ocultamos formulario y botones inferiores
+        self.view = RecursosPorAnalisisView(codigo_analisis, show_form=not embed_readonly, show_buttons=not embed_readonly)
+        # Temporizador para auto-guardar con debounce
+        self._commit_timer = QTimer()
+        self._commit_timer.setSingleShot(True)
+        self._commit_timer.timeout.connect(self.update_analysis)
         # Diccionario para acumular cambios pendientes (clave: código del recurso)
         self.changes_pending = {}
 
-        # Conectar botones definidos en la vista
-        self.view.add_button.clicked.connect(self.open_resource_selector)
-        self.view.update_button.clicked.connect(self.update_analysis)
-        # Conectar el botón del formulario manual para agregar fila
-        self.view.add_form_button.clicked.connect(self.on_add_form_button_clicked)
+        # Conectar botones definidos en la vista (si existen en este modo)
+        if hasattr(self.view, 'add_button') and self.view.add_button is not None:
+            self.view.add_button.clicked.connect(self.open_resource_selector)
+        if hasattr(self.view, 'update_button') and self.view.update_button is not None:
+            self.view.update_button.clicked.connect(self.update_analysis)
+        # Conectar el botón del formulario manual para agregar fila (si existe)
+        if hasattr(self.view, 'add_form_button') and self.view.add_form_button is not None:
+            self.view.add_form_button.clicked.connect(self.on_add_form_button_clicked)
         # Conectar la señal dataChanged del modelo para detectar ediciones
         self.view.model.dataChanged.connect(self.on_item_changed)
         print("✅ Señal dataChanged conectada correctamente.")
@@ -102,8 +118,11 @@ class RecursosPorAnalisisController(QObject):
         self.view.model.setItem(row_position, 2, QStandardItem(resource.get("unidad", "")))
         self.view.model.setItem(row_position, 3, QStandardItem("0"))
         self.view.model.setItem(row_position, 4, QStandardItem("0"))
-        self.view.model.setItem(row_position, 5, QStandardItem(str(resource.get("valor_unitario", "0"))))
-        self.view.model.setItem(row_position, 6, QStandardItem("0"))
+        
+        valor_unitario = resource.get("valor_unitario", 0)
+        self.view.model.setItem(row_position, 5, QStandardItem(f"${valor_unitario:,.2f}"))
+        self.view.model.setItem(row_position, 6, QStandardItem("$0.00"))
+        
         dialog.accept()
 
     def on_add_form_button_clicked(self):
@@ -112,6 +131,9 @@ class RecursosPorAnalisisController(QObject):
         # Aquí podrías agregar lógica adicional si es necesario.
 
     def update_analysis(self):
+        # En modo embebido solo-presupuesto no persistimos cambios a la BD
+        if getattr(self, 'embed_readonly', False):
+            return
         session = SessionLocal()
         try:
             # Borrar registros actuales para este análisis
@@ -140,11 +162,13 @@ class RecursosPorAnalisisController(QObject):
                 except Exception:
                     desperdicio = 0.0
                 try:
-                    vr_unitario = float(self.view.model.item(row, 5).text())
+                    vr_unitario_text = self.view.model.item(row, 5).text().replace('$', '').replace(',', '')
+                    vr_unitario = float(vr_unitario_text)
                 except Exception:
                     vr_unitario = 0.0
                 try:
-                    vr_parcial = float(self.view.model.item(row, 6).text())
+                    vr_parcial_text = self.view.model.item(row, 6).text().replace('$', '').replace(',', '')
+                    vr_parcial = float(vr_parcial_text)
                 except Exception:
                     vr_parcial = 0.0
 
@@ -174,6 +198,8 @@ class RecursosPorAnalisisController(QObject):
                 "Actualización Exitosa",
                 f"Análisis {self.codigo_analisis} actualizado.\nNuevo Total: {total_actualizado:.2f}"
             )
+            # Emitir la señal de que el análisis ha sido actualizado
+            self.analysis_updated.emit()
         except Exception as e:
             session.rollback()
             QMessageBox.critical(self.view, "Error", f"Error al actualizar análisis: {e}")
@@ -187,31 +213,48 @@ class RecursosPorAnalisisController(QObject):
         """
         Se dispara cuando se edita una celda del modelo.
         Actualiza en memoria (en el modelo) el vr_parcial de la fila editada.
-        No se realiza commit a la BD aquí para evitar múltiples commits.
+        Además, programa un guardado con debounce y emite el nuevo total estimado
+        para sincronizar el presupuesto en la vista principal.
         """
         row = topLeft.row()
-        # Bloqueamos las señales para evitar que la actualización de la celda dispare de nuevo este evento
+        # Bloquear para evitar recursividad
         self.view.model.blockSignals(True)
         try:
             try:
                 cantidad = float(self.view.model.item(row, 3).text())
-            except:
+            except Exception:
                 cantidad = 0.0
             try:
                 desperdicio = float(self.view.model.item(row, 4).text())
-            except:
+            except Exception:
                 desperdicio = 0.0
             try:
-                vr_unitario = float(self.view.model.item(row, 5).text())
-            except:
+                vr_unitario_text = self.view.model.item(row, 5).text().replace('$', '').replace(',', '')
+                vr_unitario = float(vr_unitario_text)
+            except Exception:
                 vr_unitario = 0.0
 
-            # Calcular vr_parcial localmente
-            vr_parcial = cantidad * (1 + desperdicio) * vr_unitario  # Asegúrate que la fórmula sea la correcta
-            # Actualizamos la celda de vr_parcial
-            self.view.model.setItem(row, 6, QStandardItem(f"{vr_parcial:.2f}"))
-            print(f"[DEBUG] on_item_changed: Fila {row} - vr_parcial recalculado: {vr_parcial:.2f}")
+            vr_parcial = cantidad * (1 + desperdicio) * vr_unitario
+            self.view.model.setItem(row, 6, QStandardItem(f"${vr_parcial:,.2f}"))
+
+            # Emitir total estimado del análisis
+            total_est = 0.0
+            for r in range(self.view.model.rowCount()):
+                try:
+                    cell = self.view.model.item(r, 6)
+                    if not cell:
+                        continue
+                    text = cell.text().replace('$', '').replace(',', '')
+                    total_est += float(text) if text else 0.0
+                except Exception:
+                    pass
+            self.analysis_total_changed.emit(self.codigo_analisis, total_est)
+            # Programar commit a BD después de 500ms sin más cambios (solo si no es embed)
+            if not getattr(self, 'embed_readonly', False):
+                try:
+                    self._commit_timer.start(500)
+                except Exception:
+                    pass
         finally:
-            # Desbloqueamos las señales después de la actualización
             self.view.model.blockSignals(False)
 

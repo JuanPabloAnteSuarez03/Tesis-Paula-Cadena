@@ -64,8 +64,6 @@ class ResourceListView(QWidget):
         
         # Campos del formulario
         fields_layout = QHBoxLayout()
-        self.codigo_input = QLineEdit()
-        self.codigo_input.setPlaceholderText("Código")
         self.descripcion_input = QLineEdit()
         self.descripcion_input.setPlaceholderText("Descripción")
         self.unidad_input = QLineEdit()
@@ -73,8 +71,6 @@ class ResourceListView(QWidget):
         self.valor_input = QLineEdit()
         self.valor_input.setPlaceholderText("Valor Unitario")
         
-        fields_layout.addWidget(QLabel("Código:"))
-        fields_layout.addWidget(self.codigo_input)
         fields_layout.addWidget(QLabel("Descripción:"))
         fields_layout.addWidget(self.descripcion_input)
         fields_layout.addWidget(QLabel("Unidad:"))
@@ -110,7 +106,13 @@ class ResourceListView(QWidget):
         self.proxy_model = MultiColumnFilterProxyModel(self)
         self.proxy_model.setSourceModel(self.model)
         self.table_view.setModel(self.proxy_model)
-        self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        
+        header = self.table_view.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # Código
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)          # Descripción
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Unidad
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Valor Unitario
+        
         layout.addWidget(self.table_view)
         
         # Conectar la señal de doble clic para seleccionar un recurso
@@ -161,11 +163,22 @@ class ResourceListView(QWidget):
         """
         self.model.removeRows(0, self.model.rowCount())
         for resource in data:
+            codigo_item = QStandardItem(str(resource.get("codigo", "")))
+            
+            descripcion = resource.get("descripcion", "")
+            descripcion_item = QStandardItem(descripcion)
+            descripcion_item.setToolTip(descripcion)
+
+            unidad_item = QStandardItem(resource.get("unidad", ""))
+            
+            valor_unitario = resource.get("valor_unitario", 0)
+            valor_item = QStandardItem(f"${valor_unitario:,.2f}")
+            
             row = [
-                QStandardItem(str(resource.get("codigo", ""))),
-                QStandardItem(resource.get("descripcion", "")),
-                QStandardItem(resource.get("unidad", "")),
-                QStandardItem(str(resource.get("valor_unitario", 0)))
+                codigo_item,
+                descripcion_item,
+                unidad_item,
+                valor_item
             ]
             self.model.appendRow(row)
 
@@ -218,7 +231,6 @@ class ResourceListView(QWidget):
         Se ejecuta al presionar el botón para agregar un recurso."
         Verifica que se hayan ingresado todos los datos y emite la señal con el nuevo recurso."
         """
-        codigo = self.codigo_input.text().strip()
         descripcion = self.descripcion_input.text().strip()
         unidad = self.unidad_input.text().strip()
         try:
@@ -226,13 +238,12 @@ class ResourceListView(QWidget):
         except ValueError:
             valor_unitario = 0.0
 
-        if not codigo or not descripcion or not unidad or valor_unitario <= 0:
-            QMessageBox.warning(self, "Error", "Todos los campos son obligatorios y el valor unitario debe ser positivo.")
+        if not descripcion or not unidad or valor_unitario <= 0:
+            QMessageBox.warning(self, "Error", "Descripción, Unidad y un valor unitario positivo son obligatorios.")
             return
 
         # Emitir la señal para que el controlador se encargue de agregar el recurso en la BD
         self.resource_added.emit({
-            "codigo": codigo,
             "descripcion": descripcion,
             "unidad": unidad,
             "valor_unitario": valor_unitario

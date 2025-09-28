@@ -5,6 +5,8 @@ from models.analisis_unitario import AnalisisUnitario
 from models.database import SessionLocal
 from views.analisis_unitarios_view import AnalisisUnitariosView
 from controllers.recursos_por_analisis_controller import RecursosPorAnalisisController
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func
 
 class AnalisisUnitariosController(QObject):
     def __init__(self, parent=None):
@@ -15,11 +17,11 @@ class AnalisisUnitariosController(QObject):
         # Conectar edición de celdas
         self.view.table.itemChanged.connect(self.on_data_changed)
         # Conectar botón de agregar análisis
-        self.view.add_analysis.connect(self.agregar_analisis)
+        self.view.add_analysis.connect(self.on_add_analysis)
         # Conectar selección de análisis
         self.view.analysis_selected.connect(self.on_analysis_selected)
         # --- Conectar eliminación de análisis ---
-        self.view.analysis_delete_requested.connect(self.delete_analysis)
+        self.view.analysis_delete_requested.connect(self.on_delete_analysis)
         # ----------------------------------------
         # Conectar la nueva señal para abrir recursos por análisis
         self.view.analysis_edit_requested.connect(self.on_edit_analysis_resources)
@@ -42,31 +44,54 @@ class AnalisisUnitariosController(QObject):
         finally:
             session.close()
 
-    def agregar_analisis(self, data):
+    def on_add_analysis(self, data):
+        """
+        Se ejecuta cuando se presiona 'Agregar Análisis' en la vista.
+        Genera un nuevo código automáticamente.
+        """
         session = SessionLocal()
         try:
-            # Verificar si ya existe
-            if session.query(AnalisisUnitario).filter(AnalisisUnitario.codigo == data["codigo"]).first():
-                QMessageBox.warning(self.view, "Error", f"Ya existe un análisis con el código {data['codigo']}.")
+            # --- Generación de código automático ---
+            last_code = session.query(func.max(AnalisisUnitario.codigo)).scalar()
+            new_code = ""
+            if not last_code:
+                new_code = "01-01-01"
+            else:
+                parts = last_code.split('-')
+                try:
+                    # Intentar incrementar la última parte
+                    last_part_int = int(parts[-1])
+                    new_last_part = last_part_int + 1
+                    # Formatear con ceros a la izquierda, manteniendo la longitud original o un mínimo de 2
+                    padding = max(2, len(parts[-1]))
+                    parts[-1] = str(new_last_part).zfill(padding)
+                    new_code = "-".join(parts)
+                except (ValueError, IndexError):
+                    # Si el formato no es el esperado, crear un nuevo código
+                    new_code = f"{last_code}-1"
+
+            # El código debe ser único
+            if session.query(AnalisisUnitario).filter(AnalisisUnitario.codigo == new_code).first():
+                QMessageBox.warning(self.view, "Error", f"El código generado '{new_code}' ya existe. Inténtelo de nuevo.")
+                session.close()
                 return
 
             nuevo_analisis = AnalisisUnitario(
-                codigo=data["codigo"],
-                descripcion=data["descripcion"],
-                unidad=data["unidad"],
-                total=data["total"]
+                codigo=new_code,
+                descripcion=data['descripcion'],
+                unidad=data['unidad'],
             )
             session.add(nuevo_analisis)
             session.commit()
-            print(f"Análisis {data['codigo']} agregado correctamente.")
+            QMessageBox.information(self.view, "Éxito", f"Análisis unitario agregado con código '{new_code}'.")
             self.load_analisis_unitarios()
         except Exception as e:
             session.rollback()
-            print(f"Error al agregar análisis {data['codigo']}: {e}")
+            QMessageBox.critical(self.view, "Error", f"No se pudo agregar el análisis: {str(e)}")
         finally:
             session.close()
 
-    def delete_analysis(self, codigo):
+    def on_delete_analysis(self, codigo):
         """
         Elimina el análisis con el código proporcionado de la base de datos y refresca la vista.
         """
@@ -106,7 +131,7 @@ class AnalisisUnitariosController(QObject):
             if analisis:
                 analisis.descripcion = descripcion
                 analisis.unidad = unidad
-                analisis.total = total
+                analisis.total_calculado = total
                 session.commit()
                 print(f"Análisis unitario {codigo} actualizado correctamente.")
             else:
@@ -119,27 +144,18 @@ class AnalisisUnitariosController(QObject):
 
         self.load_analisis_unitarios()
 
-    def on_analysis_selected(self, codigo):
-        print(f"Análisis seleccionado: {codigo}")
+    def on_analysis_selected(self, codigo_analisis):
+        """
+        Se dispara cuando se selecciona un análisis (con doble clic) en la vista principal.
+        """
+        print(f"Análisis seleccionado: {codigo_analisis}")
 
-    def on_edit_analysis_resources(self, codigo):
+    def on_edit_analysis_resources(self, codigo_analisis):
         """
-        Abre un diálogo modal con la vista de recursos por análisis
-        cuando se hace Shift+Click en un análisis unitario.
+        Abre la ventana para editar los recursos de un análisis unitario.
         """
-        print(f"Abriendo recursos para el análisis: {codigo}")
-        
-        # Crear el diálogo
-        dialog = QDialog(self.view)
-        dialog.setWindowTitle(f"Recursos del Análisis: {codigo}")
-        dialog.resize(800, 600)
-        
-        # Crear el controlador de recursos por análisis
-        recursos_controller = RecursosPorAnalisisController(codigo)
-        
-        # Configurar el layout del diálogo
-        layout = QVBoxLayout(dialog)
-        layout.addWidget(recursos_controller.view)
-        
-        # Mostrar el diálogo modal
-        dialog.exec()
+        print(f"Abriendo editor de recursos para: {codigo_analisis}")
+        self.recursos_controller = RecursosPorAnalisisController(codigo_analisis)
+        # Conectar la señal de actualización para refrescar la lista principal
+        self.recursos_controller.analysis_updated.connect(self.load_analisis_unitarios)
+        self.recursos_controller.view.show()
