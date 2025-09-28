@@ -2097,11 +2097,16 @@ class PresupuestoView(QWidget):
             ws['A1'] = "NOMBRE DE LA EMPRESA"
             ws['A1'].font = header_font
             ws['A1'].alignment = center_align
+            ws['A1'].border = thin_border
             
-            ws.merge_cells('E1:F1')
-            ws['E1'] = "LOGO DE LA EMPRESA"
-            ws['E1'].font = header_font
-            ws['E1'].alignment = center_align
+            ws.merge_cells('D1:F1')
+            ws['D1'] = "LOGO DE LA EMPRESA"
+            ws['D1'].font = header_font
+            ws['D1'].alignment = center_align
+            ws['D1'].border = thin_border
+            
+            # Ajustar altura de la primera fila
+            ws.row_dimensions[1].height = 25
             
             # Título principal
             ws.merge_cells('A3:F3')
@@ -2292,7 +2297,12 @@ class PresupuestoView(QWidget):
             ws.cell(row=current_row, column=1).font = subtotal_font
             ws.cell(row=current_row, column=1).alignment = left_align
             ws.cell(row=current_row, column=1).fill = chapter_fill
-            ws.cell(row=current_row, column=1).border = thin_border
+            
+            # Aplicar bordes a toda la fila del header
+            for col in range(1, 7):
+                ws.cell(row=current_row, column=col).border = thin_border
+                ws.cell(row=current_row, column=col).fill = chapter_fill
+            
             ws.row_dimensions[current_row].height = 18
             current_row += 1
             
@@ -2313,35 +2323,44 @@ class PresupuestoView(QWidget):
             
             # Líneas del desglose AIU
             aiu_items = [
-                ("VALOR COSTOS DIRECTOS", direct_cost, ""),
-                ("ADMINISTRACIÓN", admin_val, f"{admin_pct:.2f}%"),
-                ("IMPREVISTOS", imprev_val, f"{imprev_pct:.2f}%"),
-                ("UTILIDAD", util_val, f"{util_pct:.2f}%"),
-                ("TOTAL AIU", total_aiu_no_iva, f"{total_aiu_pct:.2f}%"),
-                ("IVA SOBRE LA UTILIDAD", iva_val, f"{iva_pct:.2f}%"),
-                ("VALOR TOTAL PRESUPUESTO", direct_cost + admin_val + imprev_val + util_val + iva_val, "")
+                ("VALOR COSTOS DIRECTOS", direct_cost, "", True),
+                ("ADMINISTRACIÓN", admin_val, f"{admin_pct:.2f}%", False),
+                ("IMPREVISTOS", imprev_val, f"{imprev_pct:.2f}%", False),
+                ("UTILIDAD", util_val, f"{util_pct:.2f}%", False),
+                ("TOTAL AIU", total_aiu_no_iva, f"{total_aiu_pct:.2f}%", True),
+                ("IVA SOBRE LA UTILIDAD", iva_val, f"{iva_pct:.2f}%", False),
+                ("VALOR TOTAL PRESUPUESTO", direct_cost + admin_val + imprev_val + util_val + iva_val, "", True)
             ]
             
-            for label, value, percentage in aiu_items:
+            for i, (label, value, percentage, is_bold) in enumerate(aiu_items):
+                # Columna del concepto (D)
                 ws.cell(row=current_row, column=4, value=label)
-                ws.cell(row=current_row, column=4).font = normal_font
+                ws.cell(row=current_row, column=4).font = subtotal_font if is_bold else normal_font
                 ws.cell(row=current_row, column=4).alignment = right_align
+                ws.cell(row=current_row, column=4).border = thin_border
                 
+                # Columna del porcentaje (E)
                 if percentage:
                     ws.cell(row=current_row, column=5, value=percentage)
                     ws.cell(row=current_row, column=5).font = normal_font
                     ws.cell(row=current_row, column=5).alignment = center_align
+                ws.cell(row=current_row, column=5).border = thin_border
                 
+                # Columna del valor (F)
                 ws.cell(row=current_row, column=6, value=value)
-                ws.cell(row=current_row, column=6).font = subtotal_font if label in ["VALOR COSTOS DIRECTOS", "TOTAL AIU", "VALOR TOTAL PRESUPUESTO"] else normal_font
+                ws.cell(row=current_row, column=6).font = subtotal_font if is_bold else normal_font
                 ws.cell(row=current_row, column=6).alignment = right_align
                 ws.cell(row=current_row, column=6).number_format = '#,##0.00'
+                ws.cell(row=current_row, column=6).border = thin_border
                 
-                # Formato especial para VALOR TOTAL PRESUPUESTO
-                if label == "VALOR TOTAL PRESUPUESTO":
-                    for col in range(4, 7):
-                        ws.cell(row=current_row, column=col).fill = chapter_fill
-                        ws.cell(row=current_row, column=col).border = thin_border
+                # Bordes para columnas A, B, C (vacías pero con borde)
+                for col in range(1, 4):
+                    ws.cell(row=current_row, column=col).border = thin_border
+                
+                # Formato especial para filas importantes (fondo gris en toda la fila)
+                if is_bold:
+                    for col in range(1, 7):  # De A a F (columnas 1-6)
+                        ws.cell(row=current_row, column=col).fill = PatternFill(start_color="E6E6E6", end_color="E6E6E6", fill_type="solid")
                 
                 ws.row_dimensions[current_row].height = 18
                 current_row += 1
@@ -2378,10 +2397,14 @@ class PresupuestoView(QWidget):
             ws.cell(row=current_row, column=1).alignment = left_align
             ws.cell(row=current_row, column=1).border = thin_border
             
-            # Crear otras hojas (placeholders por ahora)
-            wb.create_sheet("AIU")
-            wb.create_sheet("ANALISIS UNITARIOS") 
-            wb.create_sheet("INSUMOS")
+            # Crear hoja AIU con formato detallado
+            self._create_aiu_sheet(wb)
+            
+            # Crear hoja ANALISIS UNITARIOS con formato detallado
+            self._create_analisis_unitarios_sheet(wb)
+            
+            # Crear hoja INSUMOS con consolidado de recursos
+            self._create_insumos_sheet(wb)
             
             # Guardar archivo
             wb.save(filePath)
@@ -2706,3 +2729,1395 @@ class PresupuestoView(QWidget):
         self.admin_cost_total = data.get('total_aiu', 0.0)
         self.aiu_breakdown = data
         self.update_total_presupuesto()
+    
+    def _create_aiu_sheet(self, workbook):
+        """Crea la hoja de AIU con formato detallado"""
+        ws = workbook.create_sheet("AIU")
+        
+        # Estilos
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        
+        header_font = Font(bold=True, size=12)
+        normal_font = Font(size=10)
+        small_font = Font(size=9)
+        
+        header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+        light_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+        green_fill = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
+        
+        center_align = Alignment(horizontal='center', vertical='center')
+        left_align = Alignment(horizontal='left', vertical='center')
+        right_align = Alignment(horizontal='right', vertical='center')
+        
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        # Header
+        ws.merge_cells('A1:C1')
+        ws['A1'] = "NOMBRE DE LA EMPRESA"
+        ws['A1'].font = header_font
+        ws['A1'].alignment = center_align
+        ws['A1'].border = thin_border
+        
+        ws.merge_cells('D1:G1')
+        ws['D1'] = "LOGO DE LA EMPRESA"
+        ws['D1'].font = header_font
+        ws['D1'].alignment = center_align
+        ws['D1'].border = thin_border
+        
+        ws.row_dimensions[1].height = 25
+        
+        # Título
+        ws.merge_cells('A3:G3')
+        ws['A3'] = "DISCRIMINACIÓN DEL AIU"
+        ws['A3'].font = Font(bold=True, size=14)
+        ws['A3'].alignment = center_align
+        ws['A3'].fill = header_fill
+        ws['A3'].border = thin_border
+        
+        # Información básica
+        ws['A4'] = "Obra:"
+        ws.merge_cells('B4:E4')
+        ws['B4'] = "ESCRIBA AQUÍ EL NOMBRE DE LA OBRA"
+        ws['B4'].border = thin_border
+        
+        ws['F4'] = "FECHA:"
+        ws['G4'] = "19-sept-25"
+        ws['G4'].border = thin_border
+        
+        ws['F5'] = "QUIEN ELABORÓ:"
+        ws['G5'].border = thin_border
+        
+        # Obtener datos del AIU
+        direct_cost = sum(ch['subtotal'] for ch in self._get_chapters_data())
+        
+        # Intentar obtener datos del AIU embebido en MainWindow
+        aiu_data = None
+        aiu_source = "ninguna"
+        
+        try:
+            # Buscar la ventana principal
+            from PyQt6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app:
+                for widget in app.topLevelWidgets():
+                    if hasattr(widget, 'aiu_widget') and widget.aiu_widget:
+                        aiu_data = self._extract_aiu_data_from_widget(widget.aiu_widget)
+                        aiu_source = "aiu_widget embebido"
+                        break
+        except Exception as e:
+            pass
+        
+        # Si no se encontró AIU embebido, usar admin_dialog
+        if not aiu_data:
+            admin_window = getattr(self, 'admin_dialog', None)
+            if admin_window:
+                aiu_data = self._extract_aiu_data_from_widget(admin_window)
+                aiu_source = "admin_dialog"
+        
+        # Si aún no hay datos, usar valores por defecto
+        if not aiu_data:
+            aiu_data = {
+                'costo_directo': direct_cost,
+                'admin_total': direct_cost * 0.34,
+                'imprev_total': direct_cost * 0.05,
+                'util_total': direct_cost * 0.05,
+                'iva_total': direct_cost * 0.0058,
+                'profesionales': [],
+                'oficina': [],
+                'polizas': [],
+                'estampillas': []
+            }
+        
+        current_row = 7
+        
+        # Tabla principal de costos
+        ws.merge_cells('A7:G7')
+        ws.cell(row=7, column=1, value="COSTOS ADMINISTRATIVOS")
+        ws.cell(row=7, column=1).font = header_font
+        ws.cell(row=7, column=1).fill = green_fill
+        ws.cell(row=7, column=1).alignment = center_align
+        
+        # Headers
+        headers = ["", "VALOR MENSUAL", "%DEDIC", "MESES", "VALOR PARCIAL", "% SOBRE CD", "VALOR EN PESOS"]
+        for col, header in enumerate(headers, 1):
+            ws.cell(row=8, column=col, value=header)
+            ws.cell(row=8, column=col).font = small_font
+            ws.cell(row=8, column=col).fill = light_fill
+            ws.cell(row=8, column=col).alignment = center_align
+            ws.cell(row=8, column=col).border = thin_border
+        
+        current_row = 9
+        
+        # Personal técnico
+        ws.cell(row=current_row, column=1, value="PERSONAL TÉCNICO Y ADM. (Incl. Prest. Soc.)")
+        ws.cell(row=current_row, column=1).font = small_font
+        ws.cell(row=current_row, column=1).alignment = left_align
+        ws.cell(row=current_row, column=1).border = thin_border
+        current_row += 1
+        
+        # Agregar profesionales
+        total_profesionales = 0
+        profesionales_list = aiu_data.get('profesionales', [])
+        
+        # Si no hay profesionales, mostrar mensaje informativo
+        if not profesionales_list:
+            ws.cell(row=current_row, column=1, value="(No se encontraron profesionales configurados)")
+            ws.cell(row=current_row, column=1).font = small_font
+            ws.cell(row=current_row, column=1).alignment = left_align
+            for col in range(1, 8):
+                ws.cell(row=current_row, column=col).border = thin_border
+            current_row += 1
+        else:
+            # Agregar profesionales reales
+            for prof in profesionales_list:
+                profesional = prof.get('profesional', '')
+                cargo = prof.get('cargo', '')
+                salario = prof.get('salario_mensual', 0)
+                dedicacion = prof.get('dedicacion', 0)
+                meses = prof.get('meses', 6)
+                valor_total = prof.get('valor_total', 0)
+                
+                # Mostrar solo el cargo (que contiene la información principal)
+                nombre_a_mostrar = cargo if cargo else profesional
+                ws.cell(row=current_row, column=1, value=nombre_a_mostrar)
+                ws.cell(row=current_row, column=2, value=salario)
+                ws.cell(row=current_row, column=3, value=f"{dedicacion:.1f}%")
+                ws.cell(row=current_row, column=4, value=meses)
+                
+                valor_parcial = salario * meses * (dedicacion/100) if salario > 0 and meses > 0 and dedicacion > 0 else valor_total
+                ws.cell(row=current_row, column=5, value=valor_parcial)
+                
+                porcentaje_cd = (valor_parcial / aiu_data['costo_directo'] * 100) if aiu_data['costo_directo'] > 0 else 0
+                ws.cell(row=current_row, column=6, value=f"{porcentaje_cd:.2f}%")
+                ws.cell(row=current_row, column=7, value=valor_parcial)
+                
+                total_profesionales += valor_parcial
+                
+                # Aplicar formato
+                for col in range(1, 8):
+                    ws.cell(row=current_row, column=col).font = small_font
+                    ws.cell(row=current_row, column=col).border = thin_border
+                    if col in [2, 5, 7]:
+                        ws.cell(row=current_row, column=col).number_format = '#,##0.00'
+                        ws.cell(row=current_row, column=col).alignment = right_align
+                    else:
+                        ws.cell(row=current_row, column=col).alignment = center_align
+                
+                current_row += 1
+        
+        # Subtotal profesionales
+        ws.merge_cells(f'A{current_row}:F{current_row}')
+        ws.cell(row=current_row, column=1, value="TOTAL COSTOS ADMINISTRATIVOS (SUMA):")
+        ws.cell(row=current_row, column=1).font = header_font
+        ws.cell(row=current_row, column=1).alignment = right_align
+        ws.cell(row=current_row, column=7, value=total_profesionales)
+        ws.cell(row=current_row, column=7).font = header_font
+        ws.cell(row=current_row, column=7).number_format = '#,##0.00'
+        ws.cell(row=current_row, column=7).alignment = right_align
+        
+        for col in range(1, 8):
+            ws.cell(row=current_row, column=col).border = thin_border
+            ws.cell(row=current_row, column=col).fill = light_fill
+        
+        current_row += 3
+        
+        # OFICINA, PAPELERÍA Y OTROS
+        ws.merge_cells(f'A{current_row}:G{current_row}')
+        ws.cell(row=current_row, column=1, value="OFICINA, PAPELERÍA Y OTROS:")
+        ws.cell(row=current_row, column=1).font = header_font
+        ws.cell(row=current_row, column=1).fill = green_fill
+        ws.cell(row=current_row, column=1).alignment = center_align
+        ws.cell(row=current_row, column=1).border = thin_border
+        current_row += 1
+        
+        # Headers oficina
+        for col, header in enumerate(headers, 1):
+            ws.cell(row=current_row, column=col, value=header)
+            ws.cell(row=current_row, column=col).font = small_font
+            ws.cell(row=current_row, column=col).fill = light_fill
+            ws.cell(row=current_row, column=col).alignment = center_align
+            ws.cell(row=current_row, column=col).border = thin_border
+        current_row += 1
+        
+        # Datos de oficina (extraer de AIU real)
+        oficina_items = aiu_data.get('oficina', [])
+        if not oficina_items:
+            oficina_items = [
+                {"concepto": "COSTO PAPELERÍA, FOTOCOPIAS, ETC.", "valor_base": 400000, "dedicacion": 100, "meses": 6, "valor": 464200},
+                {"concepto": "COSTO OFICINA", "valor_base": 500000, "dedicacion": 70, "meses": 6, "valor": 364200}
+            ]
+        
+        total_oficina = 0
+        for item_data in oficina_items:
+            if isinstance(item_data, dict):
+                item = item_data.get('concepto', '')
+                valor_mensual = item_data.get('valor_base', 0)
+                dedic = item_data.get('dedicacion', 0)
+                meses = item_data.get('meses', 6)
+                valor_final = item_data.get('valor', 0)
+            else:
+                # Formato antiguo (tupla)
+                item, valor_mensual, dedic, meses, pct_cd, valor_final = item_data
+            
+            ws.cell(row=current_row, column=1, value=item)
+            ws.cell(row=current_row, column=2, value=valor_mensual)
+            ws.cell(row=current_row, column=3, value=f"{dedic}%")
+            ws.cell(row=current_row, column=4, value=meses)
+            
+            valor_parcial = valor_mensual * meses * (dedic/100)
+            ws.cell(row=current_row, column=5, value=valor_parcial)
+            
+            # Calcular porcentaje sobre costo directo
+            pct_cd = (valor_final / aiu_data['costo_directo'] * 100) if aiu_data['costo_directo'] > 0 else 0
+            ws.cell(row=current_row, column=6, value=f"{pct_cd:.2f}%")
+            ws.cell(row=current_row, column=7, value=valor_final)
+            
+            total_oficina += valor_final
+            
+            for col in range(1, 8):
+                ws.cell(row=current_row, column=col).font = small_font
+                ws.cell(row=current_row, column=col).border = thin_border
+                if col in [2, 5, 7]:
+                    ws.cell(row=current_row, column=col).number_format = '#,##0.00'
+                    ws.cell(row=current_row, column=col).alignment = right_align
+                else:
+                    ws.cell(row=current_row, column=col).alignment = center_align
+            
+            current_row += 1
+        
+        current_row += 2
+        
+        # LEGALIZACIÓN DEL CONTRATO (Pólizas)
+        ws.merge_cells(f'A{current_row}:G{current_row}')
+        ws.cell(row=current_row, column=1, value="LEGALIZACIÓN DEL CONTRATO (Pólizas):")
+        ws.cell(row=current_row, column=1).font = header_font
+        ws.cell(row=current_row, column=1).fill = green_fill
+        ws.cell(row=current_row, column=1).alignment = center_align
+        ws.cell(row=current_row, column=1).border = thin_border
+        current_row += 1
+        
+        # Headers pólizas
+        polizas_headers = ["", "%Requerido", "Duración", "%Prima", "Vr. TI Contrato", "%Dedic Directos", "Valor en Pesos"]
+        for col, header in enumerate(polizas_headers, 1):
+            ws.cell(row=current_row, column=col, value=header)
+            ws.cell(row=current_row, column=col).font = small_font
+            ws.cell(row=current_row, column=col).fill = light_fill
+            ws.cell(row=current_row, column=col).alignment = center_align
+            ws.cell(row=current_row, column=col).border = thin_border
+        current_row += 1
+        
+        # Datos de pólizas (extraer de AIU real)
+        polizas_items = aiu_data.get('polizas', [])
+        if not polizas_items:
+            polizas_items = [
+                {"concepto": "PÓLIZA DE CUMPLIMIENTO", "requerido": 20, "duracion": 10, "prima": 0.50, "vr_ti": 2795000, "dedicacion": 4.87, "valor": 71654400},
+                {"concepto": "PÓLIZA DE CALIDAD DEL ANTICIPO", "requerido": 100, "duracion": 10, "prima": 0.50, "vr_ti": 5590000, "dedicacion": 7.31, "valor": 5590000}
+            ]
+        
+        total_polizas = 0
+        for item_data in polizas_items:
+            if isinstance(item_data, dict):
+                item = item_data.get('concepto', '')
+                req = item_data.get('requerido', 0)
+                duracion = item_data.get('duracion', 0)
+                prima = item_data.get('prima', 0)
+                vr_ti = item_data.get('vr_ti', 0)
+                dedic = item_data.get('dedicacion', 0)
+                valor_final = item_data.get('valor', 0)
+            else:
+                # Formato antiguo (tupla)
+                item, req, duracion, prima, vr_ti, dedic, valor_final = item_data
+            ws.cell(row=current_row, column=1, value=item)
+            ws.cell(row=current_row, column=2, value=f"{req:.0f}%")
+            ws.cell(row=current_row, column=3, value=duracion)
+            ws.cell(row=current_row, column=4, value=f"{prima:.2f}%")
+            ws.cell(row=current_row, column=5, value=vr_ti)
+            ws.cell(row=current_row, column=6, value=f"{dedic:.2f}%")
+            ws.cell(row=current_row, column=7, value=valor_final)
+            
+            total_polizas += valor_final
+            
+            for col in range(1, 8):
+                ws.cell(row=current_row, column=col).font = small_font
+                ws.cell(row=current_row, column=col).border = thin_border
+                if col in [5, 7]:
+                    ws.cell(row=current_row, column=col).number_format = '#,##0.00'
+                    ws.cell(row=current_row, column=col).alignment = right_align
+                else:
+                    ws.cell(row=current_row, column=col).alignment = center_align
+            
+            current_row += 1
+        
+        current_row += 2
+        
+        # DESCUENTOS SOBRE EL CONTRATO (Estampillas)
+        ws.merge_cells(f'A{current_row}:D{current_row}')
+        ws.cell(row=current_row, column=1, value="DESCUENTOS SOBRE EL CONTRATO:")
+        ws.cell(row=current_row, column=1).font = header_font
+        ws.cell(row=current_row, column=1).fill = green_fill
+        ws.cell(row=current_row, column=1).alignment = center_align
+        ws.cell(row=current_row, column=1).border = thin_border
+        current_row += 1
+        
+        # Headers estampillas (solo 3 columnas)
+        estampillas_headers = ["", "Vr. TI Contrato", "%", "Valor en Pesos"]
+        for col, header in enumerate(estampillas_headers, 1):
+            if col <= 4:  # Solo las primeras 4 columnas (A, B, C, D)
+                ws.cell(row=current_row, column=col, value=header)
+                ws.cell(row=current_row, column=col).font = small_font
+                ws.cell(row=current_row, column=col).fill = light_fill
+                ws.cell(row=current_row, column=col).alignment = center_align
+                ws.cell(row=current_row, column=col).border = thin_border
+        current_row += 1
+        
+        # Datos de estampillas (extraer de AIU real)
+        estampillas_items = aiu_data.get('estampillas', [])
+        if not estampillas_items:
+            estampillas_items = [
+                {"concepto": "Estampilla pro Desarrollo", "vr_ti": 374052564, "porcentaje": 4, "valor": 72742543},
+                {"concepto": "Estampilla pro Univalle", "vr_ti": 2078069804, "porcentaje": 1.43, "valor": 20780698},
+                {"concepto": "Estampilla pro Hospital", "vr_ti": 2078069804, "porcentaje": 1, "valor": 20780698}
+            ]
+        
+        total_estampillas = 0
+        for item_data in estampillas_items:
+            if isinstance(item_data, dict):
+                item = item_data.get('concepto', '')
+                vr_ti = item_data.get('vr_ti', 0)
+                pct = item_data.get('porcentaje', 0)
+                valor_final = item_data.get('valor', 0)
+                col2 = col3 = col5 = ""
+            else:
+                # Formato antiguo (tupla)
+                item, col2, col3, vr_ti, col5, pct, valor_final = item_data
+            # Solo usar 4 columnas: Concepto, Vr. TI Contrato, %, Valor en Pesos
+            ws.cell(row=current_row, column=1, value=item)
+            ws.cell(row=current_row, column=2, value=vr_ti)
+            ws.cell(row=current_row, column=3, value=f"{pct}%")
+            ws.cell(row=current_row, column=4, value=valor_final)
+            
+            total_estampillas += valor_final
+            
+            for col in range(1, 5):  # Solo columnas A, B, C, D
+                ws.cell(row=current_row, column=col).font = small_font
+                ws.cell(row=current_row, column=col).border = thin_border
+                if col in [2, 4]:  # Vr. TI Contrato y Valor en Pesos
+                    ws.cell(row=current_row, column=col).number_format = '#,##0.00'
+                    ws.cell(row=current_row, column=col).alignment = right_align
+                elif col == 3:  # Porcentaje
+                    ws.cell(row=current_row, column=col).alignment = center_align
+                else:  # Concepto
+                    ws.cell(row=current_row, column=col).alignment = left_align
+            
+            current_row += 1
+        
+        current_row += 2
+        
+        # TOTALES FINALES - Usar datos reales del AIU
+        costo_directo = aiu_data['costo_directo']
+        admin_total = aiu_data.get('admin_total', 0)
+        imprev_total = aiu_data.get('imprev_total', 0)
+        util_total = aiu_data.get('util_total', 0)
+        iva_total = aiu_data.get('iva_total', 0)
+        
+        # Calcular porcentajes sobre costo directo
+        admin_pct = (admin_total / costo_directo * 100) if costo_directo > 0 else 0
+        imprev_pct = (imprev_total / costo_directo * 100) if costo_directo > 0 else 0
+        util_pct = (util_total / costo_directo * 100) if costo_directo > 0 else 0
+        
+        # Para IVA, calcular sobre la utilidad
+        iva_base = util_total
+        iva_pct = (iva_total / iva_base * 100) if iva_base > 0 else 0
+        
+        total_aiu = admin_total + imprev_total + util_total + iva_total
+        total_aiu_pct = (total_aiu / costo_directo * 100) if costo_directo > 0 else 0
+        
+        # Tabla de resumen final
+        resumen_totales = [
+            ("ADMINISTRACIÓN:", f"{admin_pct:.2f}%", admin_total, True),
+            ("IMPREVISTOS:", f"{imprev_pct:.2f}%", imprev_total, False),
+            ("UTILIDAD:", f"{util_pct:.2f}%", util_total, False),
+            ("IVA SOBRE LA UTILIDAD:", f"{iva_pct:.2f}%", iva_total, False),
+            ("COSTO TOTAL DEL AIU:", f"{total_aiu_pct:.2f}%", total_aiu, True)
+        ]
+        
+        for label, pct, valor, is_bold in resumen_totales:
+            ws.merge_cells(f'A{current_row}:C{current_row}')
+            ws.cell(row=current_row, column=1, value=label)
+            ws.cell(row=current_row, column=1).font = header_font if is_bold else normal_font
+            ws.cell(row=current_row, column=1).alignment = right_align
+            
+            ws.cell(row=current_row, column=4, value=pct)
+            ws.cell(row=current_row, column=4).font = header_font if is_bold else normal_font
+            ws.cell(row=current_row, column=4).alignment = center_align
+            
+            ws.cell(row=current_row, column=5, value=valor)
+            ws.cell(row=current_row, column=5).font = header_font if is_bold else normal_font
+            ws.cell(row=current_row, column=5).number_format = '#,##0.00'
+            ws.cell(row=current_row, column=5).alignment = right_align
+            
+            # Aplicar bordes y fondo para filas importantes
+            for col in range(1, 6):
+                ws.cell(row=current_row, column=col).border = thin_border
+                if is_bold:
+                    ws.cell(row=current_row, column=col).fill = light_fill
+            
+            current_row += 1
+        
+        # Ajustar anchos de columna
+        ws.column_dimensions['A'].width = 35
+        ws.column_dimensions['B'].width = 15
+        ws.column_dimensions['C'].width = 10
+        ws.column_dimensions['D'].width = 10
+        ws.column_dimensions['E'].width = 15
+        ws.column_dimensions['F'].width = 12
+        ws.column_dimensions['G'].width = 15
+    
+    def _get_chapters_data(self):
+        """Obtiene datos de capítulos para cálculos"""
+        from PyQt6.QtCore import Qt
+        chapters = []
+        current = None
+        
+        for tr in range(self.table.rowCount()):
+            it0 = self.table.item(tr, 0)
+            if not it0:
+                continue
+                
+            role = it0.data(Qt.ItemDataRole.UserRole)
+            
+            if role == 'chapter':
+                if current:
+                    chapters.append(current)
+                desc1 = self.table.item(tr, 1)
+                current = {
+                    'title': it0.text(),
+                    'desc': desc1.text() if desc1 else '',
+                    'items': [],
+                    'subtotal': 0.0
+                }
+            elif role == 'subtotal':
+                val_item = self.table.item(tr, 5)
+                val_txt = val_item.text() if val_item else '0'
+                try:
+                    st = float(str(val_txt).replace('$','').replace(',','').replace(' ',''))
+                except Exception:
+                    st = 0.0
+                if current:
+                    current['subtotal'] = st
+        
+        if current:
+            chapters.append(current)
+        return chapters
+    
+    def _extract_aiu_data_from_widget(self, admin_window):
+        """Extrae datos detallados del AIU window"""
+        data = {
+            'costo_directo': admin_window.costo_directo,
+            'admin_total': getattr(admin_window, '_admin_total', 0),
+            'imprev_total': getattr(admin_window, '_imprev_total', 0),
+            'util_total': getattr(admin_window, '_util_total', 0),
+            'iva_total': getattr(admin_window, '_iva_total', 0),
+            'profesionales': [],
+            'oficina': [],
+            'polizas': [],
+            'estampillas': []
+        }
+        
+        # Extraer datos de profesionales
+        if hasattr(admin_window, 'table'):
+            table = admin_window.table
+            for row in range(table.rowCount()):  # Incluir todas las filas
+                try:
+                    # Columnas: "Profesional", "Cargo", "Salario Mensual", "% Dedicación", "Meses", "Total"
+                    profesional_item = table.item(row, 0)
+                    cargo_item = table.item(row, 1)
+                    salario_item = table.item(row, 2)
+                    dedicacion_item = table.item(row, 3)
+                    meses_item = table.item(row, 4)
+                    valor_item = table.item(row, 5)
+                    
+                    profesional = profesional_item.text() if profesional_item else ""
+                    cargo = cargo_item.text() if cargo_item else ""
+                    
+                    if profesional and not profesional.upper().startswith("SUBTOTAL") and profesional.strip() != "":
+                        salario = float((salario_item.text() if salario_item else '0').replace('$','').replace(',','').strip())
+                        dedicacion = float((dedicacion_item.text() if dedicacion_item else '0').replace('%','').strip())
+                        meses = float((meses_item.text() if meses_item else '0').strip())
+                        valor_total = float((valor_item.text() if valor_item else '0').replace('$','').replace(',','').strip())
+                        
+                        data['profesionales'].append({
+                            'profesional': profesional,
+                            'cargo': cargo,
+                            'salario_mensual': salario,
+                            'dedicacion': dedicacion,
+                            'meses': meses,
+                            'valor_total': valor_total
+                        })
+                except Exception as e:
+                    continue
+        
+        # Extraer datos de oficina
+        if hasattr(admin_window, 'tbl_oficina'):
+            table = admin_window.tbl_oficina
+            for row in range(table.rowCount()):  # Incluir todas las filas
+                try:
+                    concepto_item = table.item(row, 0)
+                    concepto = concepto_item.text() if concepto_item else ""
+                    if concepto and not concepto.upper().startswith("SUBTOTAL") and concepto.strip() != "":
+                        valor_base_item = table.item(row, 1)
+                        dedicacion_item = table.item(row, 2)
+                        meses_item = table.item(row, 3)
+                        valor_item = table.item(row, 4)
+                        
+                        valor_base = float((valor_base_item.text() if valor_base_item else '0').replace('$','').replace(',','').strip())
+                        dedicacion = float((dedicacion_item.text() if dedicacion_item else '0').replace('%','').strip())
+                        meses = float((meses_item.text() if meses_item else '0').strip())
+                        valor = float((valor_item.text() if valor_item else '0').replace('$','').replace(',','').strip())
+                        
+                        data['oficina'].append({
+                            'concepto': concepto,
+                            'valor_base': valor_base,
+                            'dedicacion': dedicacion,
+                            'meses': meses,
+                            'valor': valor
+                        })
+                except Exception:
+                    continue
+        
+        # Extraer datos de pólizas
+        if hasattr(admin_window, 'tbl_polizas'):
+            table = admin_window.tbl_polizas
+            for row in range(table.rowCount()):  # Incluir todas las filas
+                try:
+                    concepto_item = table.item(row, 0)
+                    concepto = concepto_item.text() if concepto_item else ""
+                    if concepto and not concepto.upper().startswith("SUBTOTAL") and concepto.strip() != "":
+                        requerido_item = table.item(row, 1)
+                        duracion_item = table.item(row, 2)
+                        prima_item = table.item(row, 3)
+                        vr_ti_item = table.item(row, 4)
+                        dedicacion_item = table.item(row, 5)
+                        valor_item = table.item(row, 6)
+                        
+                        requerido = float((requerido_item.text() if requerido_item else '0').replace('%','').strip())
+                        duracion = float((duracion_item.text() if duracion_item else '0').strip())
+                        prima = float((prima_item.text() if prima_item else '0').replace('%','').strip())
+                        vr_ti = float((vr_ti_item.text() if vr_ti_item else '0').replace('$','').replace(',','').strip())
+                        dedicacion = float((dedicacion_item.text() if dedicacion_item else '0').replace('%','').strip())
+                        valor = float((valor_item.text() if valor_item else '0').replace('$','').replace(',','').strip())
+                        
+                        data['polizas'].append({
+                            'concepto': concepto,
+                            'requerido': requerido,
+                            'duracion': duracion,
+                            'prima': prima,
+                            'vr_ti': vr_ti,
+                            'dedicacion': dedicacion,
+                            'valor': valor
+                        })
+                except Exception:
+                    continue
+        
+        # Extraer datos de estampillas
+        if hasattr(admin_window, 'tbl_estamp'):
+            table = admin_window.tbl_estamp
+            for row in range(table.rowCount()):  # Incluir todas las filas
+                try:
+                    concepto_item = table.item(row, 0)
+                    concepto = concepto_item.text() if concepto_item else ""
+                    if concepto and not concepto.upper().startswith("SUBTOTAL") and concepto.strip() != "":
+                        porcentaje_item = table.item(row, 1)
+                        valor_item = table.item(row, 2)
+                        
+                        porcentaje = float((porcentaje_item.text() if porcentaje_item else '0').replace('%','').strip())
+                        valor = float((valor_item.text() if valor_item else '0').replace('$','').replace(',','').strip())
+                        
+                        data['estampillas'].append({
+                            'concepto': concepto,
+                            'vr_ti': admin_window.costo_directo,  # Usar costo directo como base
+                            'porcentaje': porcentaje,
+                            'valor': valor
+                        })
+                except Exception:
+                    continue
+        
+        return data
+    
+    def _create_analisis_unitarios_sheet(self, workbook):
+        """Crea la hoja de ANALISIS UNITARIOS con una tabla por cada análisis"""
+        ws = workbook.create_sheet("ANALISIS UNITARIOS")
+        
+        # Ajustar ancho de columnas
+        ws.column_dimensions['A'].width = 15  # CÓDIGO RECURSO
+        ws.column_dimensions['B'].width = 40  # DESCRIPCIÓN
+        ws.column_dimensions['C'].width = 8   # UND
+        ws.column_dimensions['D'].width = 10  # CANT.
+        ws.column_dimensions['E'].width = 10  # DESP.%
+        ws.column_dimensions['F'].width = 15  # PRECIO UNIT
+        ws.column_dimensions['G'].width = 15  # VALOR PARCIAL (mismo tamaño que PRECIO UNIT)
+        
+        # Estilos
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        
+        header_font = Font(bold=True, size=12)
+        normal_font = Font(size=10)
+        small_font = Font(size=9)
+        
+        header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+        light_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+        blue_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+        
+        center_align = Alignment(horizontal='center', vertical='center')
+        left_align = Alignment(horizontal='left', vertical='center')
+        right_align = Alignment(horizontal='right', vertical='center')
+        
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        # Header
+        ws.merge_cells('A1:C1')
+        ws['A1'] = "NOMBRE DE LA EMPRESA"
+        ws['A1'].font = header_font
+        ws['A1'].alignment = center_align
+        ws['A1'].border = thin_border
+        
+        ws.merge_cells('D1:F1')
+        ws['D1'] = "LOGO DE LA EMPRESA"
+        ws['D1'].font = header_font
+        ws['D1'].alignment = center_align
+        ws['D1'].border = thin_border
+        
+        ws.row_dimensions[1].height = 25
+        
+        # Título
+        ws.merge_cells('A3:F3')
+        ws['A3'] = "ANÁLISIS DE PRECIOS UNITARIOS"
+        ws['A3'].font = Font(bold=True, size=14)
+        ws['A3'].alignment = center_align
+        ws['A3'].fill = header_fill
+        ws['A3'].border = thin_border
+        
+        # Información básica
+        ws['A4'] = "Obra:"
+        ws.merge_cells('B4:D4')
+        ws['B4'] = "ESCRIBA AQUÍ EL NOMBRE DE LA OBRA"
+        ws['B4'].border = thin_border
+        
+        ws['E4'] = "FECHA:"
+        ws['F4'] = "19-sept-25"
+        ws['F4'].border = thin_border
+        
+        ws['E5'] = "QUIEN ELABORÓ:"
+        ws['F5'].border = thin_border
+        
+        current_row = 7
+        
+        # Obtener análisis únicos del presupuesto
+        analisis_list = self._get_unique_analisis_from_presupuesto()
+        
+        # Obtener porcentajes AIU para aplicar
+        aiu_percentages = self._get_aiu_percentages()
+        
+        # Crear una tabla por cada análisis
+        for analisis_data in analisis_list:
+            current_row = self._create_single_analisis_table(ws, analisis_data, aiu_percentages, current_row, 
+                                                           header_font, normal_font, small_font, 
+                                                           header_fill, light_fill, blue_fill,
+                                                           center_align, left_align, right_align, thin_border)
+            current_row += 3  # Espacio entre tablas
+        
+        # Ajustar anchos de columna
+        ws.column_dimensions['A'].width = 15
+        ws.column_dimensions['B'].width = 35
+        ws.column_dimensions['C'].width = 10
+        ws.column_dimensions['D'].width = 12
+        ws.column_dimensions['E'].width = 15
+        ws.column_dimensions['F'].width = 15
+    
+    def _get_unique_analisis_from_presupuesto(self):
+        """Obtiene la lista de análisis únicos del presupuesto"""
+        from PyQt6.QtCore import Qt
+        analisis_set = set()
+        analisis_list = []
+        
+        # Recorrer la tabla del presupuesto para encontrar análisis únicos
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if not item:
+                continue
+            
+            role = item.data(Qt.ItemDataRole.UserRole)
+            if role and role != 'chapter' and role != 'subtotal':
+                # Es un análisis
+                if role not in analisis_set:
+                    analisis_set.add(role)
+                    desc_item = self.table.item(row, 1)
+                    und_item = self.table.item(row, 2)
+                    cant_item = self.table.item(row, 3)
+                    
+                    descripcion = desc_item.text() if desc_item else ""
+                    unidad = und_item.text() if und_item else ""
+                    cantidad = float((cant_item.text() or '0').replace(',','')) if cant_item else 0
+                    
+                    analisis_list.append({
+                        'codigo': role,
+                        'descripcion': descripcion,
+                        'unidad': unidad,
+                        'cantidad': cantidad
+                    })
+        
+        return analisis_list
+    
+    def _get_aiu_percentages(self):
+        """Obtiene los porcentajes AIU calculados"""
+        # Obtener datos del AIU
+        direct_cost = sum(ch['subtotal'] for ch in self._get_chapters_data())
+        
+        # Intentar obtener datos del AIU embebido
+        aiu_data = None
+        try:
+            from PyQt6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app:
+                for widget in app.topLevelWidgets():
+                    if hasattr(widget, 'aiu_widget') and widget.aiu_widget:
+                        aiu_data = self._extract_aiu_data_from_widget(widget.aiu_widget)
+                        break
+        except Exception:
+            pass
+        
+        if not aiu_data:
+            admin_window = getattr(self, 'admin_dialog', None)
+            if admin_window:
+                aiu_data = self._extract_aiu_data_from_widget(admin_window)
+        
+        if not aiu_data:
+            # Valores por defecto
+            return {
+                'admin_pct': 5.08,
+                'imprev_pct': 5.00,
+                'util_pct': 5.00,
+                'iva_pct': 19.00,
+                'total_indirectos_pct': 6.18
+            }
+        
+        # Calcular porcentajes reales
+        costo_directo = aiu_data['costo_directo']
+        admin_total = aiu_data.get('admin_total', 0)
+        imprev_total = aiu_data.get('imprev_total', 0)
+        util_total = aiu_data.get('util_total', 0)
+        iva_total = aiu_data.get('iva_total', 0)
+        
+        admin_pct = (admin_total / costo_directo * 100) if costo_directo > 0 else 0
+        imprev_pct = (imprev_total / costo_directo * 100) if costo_directo > 0 else 0
+        util_pct = (util_total / costo_directo * 100) if costo_directo > 0 else 0
+        iva_pct = (iva_total / util_total * 100) if util_total > 0 else 0
+        
+        total_aiu = admin_total + imprev_total + util_total + iva_total
+        total_indirectos_pct = (total_aiu / costo_directo * 100) if costo_directo > 0 else 0
+        
+        return {
+            'admin_pct': admin_pct,
+            'imprev_pct': imprev_pct,
+            'util_pct': util_pct,
+            'iva_pct': iva_pct,
+            'total_indirectos_pct': total_indirectos_pct
+        }
+    
+    def _create_single_analisis_table(self, ws, analisis_data, aiu_percentages, start_row,
+                                    header_font, normal_font, small_font,
+                                    header_fill, light_fill, blue_fill,
+                                    center_align, left_align, right_align, thin_border):
+        """Crea una tabla individual para un análisis unitario"""
+        current_row = start_row
+        
+        # Header del análisis
+        ws.merge_cells(f'A{current_row}:G{current_row}')
+        ws.cell(row=current_row, column=1, value=f"{analisis_data['codigo']} - {analisis_data['descripcion']}")
+        ws.cell(row=current_row, column=1).font = header_font
+        ws.cell(row=current_row, column=1).alignment = left_align
+        ws.cell(row=current_row, column=1).fill = blue_fill
+        for col in range(1, 8):  # Aplicar bordes a todas las columnas (A-G)
+            ws.cell(row=current_row, column=col).border = thin_border
+        current_row += 1
+        
+        # Información del análisis
+        ws.cell(row=current_row, column=1, value="UNIDAD:")
+        ws.cell(row=current_row, column=2, value=analisis_data['unidad'])
+        ws.cell(row=current_row, column=4, value="ITEM:")
+        ws.cell(row=current_row, column=5, value=analisis_data['codigo'])
+        current_row += 1
+        
+        # Headers de la tabla de recursos (7 columnas)
+        headers = ["CÓDIGO RECURSO", "DESCRIPCIÓN", "UND", "CANT.", "DESP.%", "PRECIO UNIT", "VALOR PARCIAL"]
+        for col, header in enumerate(headers, 1):
+            ws.cell(row=current_row, column=col, value=header)
+            ws.cell(row=current_row, column=col).font = small_font
+            ws.cell(row=current_row, column=col).fill = light_fill
+            ws.cell(row=current_row, column=col).alignment = center_align
+            ws.cell(row=current_row, column=col).border = thin_border
+        current_row += 1
+        
+        # Obtener recursos del análisis
+        recursos = self._get_recursos_for_analisis(analisis_data['codigo'])
+        
+        # Debug: si no hay recursos, mostrar mensaje
+        if not recursos:
+            ws.cell(row=current_row, column=1, value=f"(No se encontraron recursos para el análisis {analisis_data['codigo']})")
+            ws.cell(row=current_row, column=1).font = small_font
+            for col in range(1, 7):
+                ws.cell(row=current_row, column=col).border = thin_border
+            current_row += 1
+        
+        # Subtotales por categoría
+        subtotales = {'MATERIALES': 0, 'MANO DE OBRA': 0, 'EQUIPO': 0, 'OTROS': 0}
+        current_category = None
+        
+        for recurso in recursos:
+            # Detectar cambio de categoría
+            if recurso['categoria'] != current_category:
+                if current_category:  # Agregar subtotal de categoría anterior
+                    ws.merge_cells(f'A{current_row}:F{current_row}')
+                    ws.cell(row=current_row, column=1, value=f"SUBTOTAL {current_category}:")
+                    ws.cell(row=current_row, column=1).font = small_font
+                    ws.cell(row=current_row, column=1).alignment = right_align
+                    ws.cell(row=current_row, column=7, value=subtotales[current_category])
+                    ws.cell(row=current_row, column=7).font = small_font
+                    ws.cell(row=current_row, column=7).number_format = '#,##0.00'
+                    ws.cell(row=current_row, column=7).alignment = right_align
+                    for col in range(1, 8):
+                        ws.cell(row=current_row, column=col).border = thin_border
+                        ws.cell(row=current_row, column=col).fill = light_fill
+                    current_row += 1
+                
+                # Header de nueva categoría
+                current_category = recurso['categoria']
+                ws.cell(row=current_row, column=1, value=f"--- {current_category} ---")
+                ws.cell(row=current_row, column=1).font = small_font
+                ws.cell(row=current_row, column=1).alignment = left_align
+                for col in range(1, 8):
+                    ws.cell(row=current_row, column=col).border = thin_border
+                current_row += 1
+            
+            # Datos del recurso
+            valor_parcial = recurso['cantidad'] * (1 + recurso['desperdicio']/100) * recurso['precio_unitario']
+            subtotales[current_category] += valor_parcial
+            
+            ws.cell(row=current_row, column=1, value=recurso['codigo'])
+            ws.cell(row=current_row, column=2, value=recurso['descripcion'])
+            ws.cell(row=current_row, column=3, value=recurso['unidad'])
+            ws.cell(row=current_row, column=4, value=recurso['cantidad'])
+            ws.cell(row=current_row, column=5, value=f"{recurso['desperdicio']:.1f}%")
+            ws.cell(row=current_row, column=6, value=recurso['precio_unitario'])
+            ws.cell(row=current_row, column=7, value=valor_parcial)
+            
+            # Aplicar formato a todas las 7 columnas
+            for col in range(1, 8):
+                ws.cell(row=current_row, column=col).font = small_font
+                ws.cell(row=current_row, column=col).border = thin_border
+                if col in [4, 6, 7]:  # Cantidad, Precio Unit, Valor Parcial
+                    ws.cell(row=current_row, column=col).number_format = '#,##0.00'
+                    ws.cell(row=current_row, column=col).alignment = right_align
+                elif col == 5:  # Desperdicio %
+                    ws.cell(row=current_row, column=col).alignment = center_align
+                else:  # Código, Descripción, Unidad
+                    ws.cell(row=current_row, column=col).alignment = left_align
+            
+            current_row += 1
+        
+        # Subtotal de la última categoría
+        if current_category:
+            ws.merge_cells(f'A{current_row}:F{current_row}')
+            ws.cell(row=current_row, column=1, value=f"SUBTOTAL {current_category}:")
+            ws.cell(row=current_row, column=1).font = small_font
+            ws.cell(row=current_row, column=1).alignment = right_align
+            ws.cell(row=current_row, column=7, value=subtotales[current_category])
+            ws.cell(row=current_row, column=7).font = small_font
+            ws.cell(row=current_row, column=7).number_format = '#,##0.00'
+            ws.cell(row=current_row, column=7).alignment = right_align
+            for col in range(1, 8):
+                ws.cell(row=current_row, column=col).border = thin_border
+                ws.cell(row=current_row, column=col).fill = light_fill
+            current_row += 1
+        
+        # Costo directo total
+        costo_directo = sum(subtotales.values())
+        ws.merge_cells(f'A{current_row}:F{current_row}')
+        ws.cell(row=current_row, column=1, value="COSTO DIRECTO:")
+        ws.cell(row=current_row, column=1).font = header_font
+        ws.cell(row=current_row, column=1).alignment = right_align
+        ws.cell(row=current_row, column=7, value=costo_directo)
+        ws.cell(row=current_row, column=7).font = header_font
+        ws.cell(row=current_row, column=7).number_format = '#,##0.00'
+        ws.cell(row=current_row, column=7).alignment = right_align
+        for col in range(1, 8):
+            ws.cell(row=current_row, column=col).border = thin_border
+            ws.cell(row=current_row, column=col).fill = header_fill
+        current_row += 1
+        
+        # Costos indirectos
+        current_row += 1
+        ws.merge_cells(f'A{current_row}:G{current_row}')
+        ws.cell(row=current_row, column=1, value="COSTOS INDIRECTOS")
+        ws.cell(row=current_row, column=1).font = header_font
+        ws.cell(row=current_row, column=1).alignment = center_align
+        for col in range(1, 8):
+            ws.cell(row=current_row, column=col).border = thin_border
+            ws.cell(row=current_row, column=col).fill = header_fill
+        current_row += 1
+        
+        # Aplicar porcentajes AIU
+        aiu_items = [
+            ("ADMINISTRACIÓN", aiu_percentages['admin_pct']),
+            ("IMPREVISTOS", aiu_percentages['imprev_pct']),
+            ("UTILIDAD", aiu_percentages['util_pct']),
+            ("IVA SOBRE LA UTILIDAD", aiu_percentages['iva_pct']),
+            ("TOTAL COSTOS INDIRECTOS", aiu_percentages['total_indirectos_pct'])
+        ]
+        
+        for concepto, porcentaje in aiu_items:
+            valor = costo_directo * (porcentaje / 100)
+            
+            ws.merge_cells(f'A{current_row}:E{current_row}')
+            ws.cell(row=current_row, column=1, value=concepto)
+            ws.cell(row=current_row, column=1).font = normal_font
+            ws.cell(row=current_row, column=1).alignment = right_align
+            
+            ws.cell(row=current_row, column=6, value=f"{porcentaje:.2f}%")
+            ws.cell(row=current_row, column=6).font = normal_font
+            ws.cell(row=current_row, column=6).alignment = center_align
+            
+            ws.cell(row=current_row, column=7, value=valor)
+            ws.cell(row=current_row, column=7).font = normal_font
+            ws.cell(row=current_row, column=7).number_format = '#,##0.00'
+            ws.cell(row=current_row, column=7).alignment = right_align
+            
+            for col in range(1, 8):
+                ws.cell(row=current_row, column=col).border = thin_border
+            
+            current_row += 1
+        
+        # Valor total del ítem
+        valor_total_item = costo_directo * (1 + aiu_percentages['total_indirectos_pct'] / 100)
+        ws.merge_cells(f'A{current_row}:F{current_row}')
+        ws.cell(row=current_row, column=1, value="VALOR TOTAL ITEM:")
+        ws.cell(row=current_row, column=1).font = header_font
+        ws.cell(row=current_row, column=1).alignment = right_align
+        ws.cell(row=current_row, column=7, value=valor_total_item)
+        ws.cell(row=current_row, column=7).font = header_font
+        ws.cell(row=current_row, column=7).number_format = '#,##0.00'
+        ws.cell(row=current_row, column=7).alignment = right_align
+        for col in range(1, 8):
+            ws.cell(row=current_row, column=col).border = thin_border
+            ws.cell(row=current_row, column=col).fill = header_fill
+        
+        return current_row + 1
+    
+    def _get_recursos_for_analisis(self, codigo_analisis):
+        """Obtiene los recursos desde la vista de análisis del presupuesto"""
+        try:
+            # Buscar en la ventana principal los controladores de análisis
+            from PyQt6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app:
+                for widget in app.topLevelWidgets():
+                    if hasattr(widget, '_analisis_presupuesto_ctrls'):
+                        # Buscar el controlador específico para este análisis
+                        for ctrl in widget._analisis_presupuesto_ctrls:
+                            if hasattr(ctrl, 'codigo_analisis') and ctrl.codigo_analisis == codigo_analisis:
+                                return self._extract_recursos_from_controller(ctrl)
+            
+            # Si no encuentra el controlador, usar datos de ejemplo
+            return self._get_ejemplo_recursos(codigo_analisis)
+            
+        except Exception as e:
+            print(f"Error obteniendo recursos para {codigo_analisis}: {e}")
+            return self._get_ejemplo_recursos(codigo_analisis)
+    
+    def _extract_recursos_from_controller(self, controller):
+        """Extrae recursos del controlador de RecursosPorAnalisis"""
+        recursos = []
+        try:
+            if hasattr(controller, 'view') and hasattr(controller.view, 'model'):
+                model = controller.view.model
+                current_category = 'OTROS'
+                
+                for row in range(model.rowCount()):
+                    # Obtener datos de cada columna
+                    codigo_item = model.item(row, 0)
+                    desc_item = model.item(row, 1)
+                    unidad_item = model.item(row, 2)
+                    cantidad_item = model.item(row, 3)
+                    desp_item = model.item(row, 4)
+                    precio_item = model.item(row, 5)
+                    
+                    if not codigo_item:
+                        continue
+                    
+                    codigo = codigo_item.text()
+                    
+                    # Detectar headers de categoría
+                    if codigo.startswith('===') or codigo.startswith('===='):
+                        if 'MANO DE OBRA' in codigo:
+                            current_category = 'MANO DE OBRA'
+                        elif 'EQUIPO' in codigo:
+                            current_category = 'EQUIPO'
+                        elif 'MATERIALES' in codigo:
+                            current_category = 'MATERIALES'
+                        else:
+                            current_category = 'OTROS'
+                        continue
+                    
+                    # Extraer datos del recurso
+                    descripcion = desc_item.text() if desc_item else ''
+                    unidad = unidad_item.text() if unidad_item else ''
+                    cantidad_str = cantidad_item.text() if cantidad_item else '0'
+                    desp_str = desp_item.text() if desp_item else '0'
+                    precio_str = precio_item.text() if precio_item else '$0'
+                    
+                    # Limpiar y convertir valores
+                    try:
+                        cantidad = float(cantidad_str.replace(',', ''))
+                    except:
+                        cantidad = 0.0
+                    
+                    try:
+                        desperdicio = float(desp_str.replace('%', '').replace(',', ''))
+                    except:
+                        desperdicio = 0.0
+                    
+                    try:
+                        precio = float(precio_str.replace('$', '').replace(',', ''))
+                    except:
+                        precio = 0.0
+                    
+                    if codigo and descripcion:  # Solo agregar si tiene datos válidos
+                        recursos.append({
+                            'codigo': codigo,
+                            'descripcion': descripcion,
+                            'unidad': unidad,
+                            'cantidad': cantidad,
+                            'desperdicio': desperdicio,
+                            'precio_unitario': precio,
+                            'categoria': current_category
+                        })
+                
+        except Exception as e:
+            print(f"Error extrayendo recursos del controlador: {e}")
+        
+        return recursos
+    
+    def _create_insumos_sheet(self, workbook):
+        """Crea la hoja de INSUMOS consolidando todos los recursos por categoría"""
+        ws = workbook.create_sheet("INSUMOS")
+        
+        # Ajustar ancho de columnas
+        ws.column_dimensions['A'].width = 50  # DESCRIPCIÓN
+        ws.column_dimensions['B'].width = 8   # UND
+        ws.column_dimensions['C'].width = 12  # CANT.
+        ws.column_dimensions['D'].width = 15  # VR. UNIT.
+        ws.column_dimensions['E'].width = 15  # VR. TOTAL
+        
+        # Estilos
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        
+        header_font = Font(bold=True, size=12)
+        normal_font = Font(size=10)
+        small_font = Font(size=9)
+        
+        header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+        light_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+        blue_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+        
+        center_align = Alignment(horizontal='center', vertical='center')
+        left_align = Alignment(horizontal='left', vertical='center')
+        right_align = Alignment(horizontal='right', vertical='center')
+        
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        # Header del documento
+        ws.merge_cells('A1:C1')
+        ws['A1'] = "NOMBRE DE LA EMPRESA"
+        ws['A1'].font = header_font
+        ws['A1'].alignment = center_align
+        ws['A1'].border = thin_border
+        
+        ws.merge_cells('D1:E1')
+        ws['D1'] = "LOGO DE LA EMPRESA"
+        ws['D1'].font = header_font
+        ws['D1'].alignment = center_align
+        ws['D1'].border = thin_border
+        
+        ws.row_dimensions[1].height = 25
+        
+        # Título principal
+        current_row = 3
+        ws.merge_cells(f'A{current_row}:E{current_row}')
+        ws.cell(row=current_row, column=1, value="INSUMOS")
+        ws.cell(row=current_row, column=1).font = header_font
+        ws.cell(row=current_row, column=1).alignment = center_align
+        ws.cell(row=current_row, column=1).fill = blue_fill
+        for col in range(1, 6):
+            ws.cell(row=current_row, column=col).border = thin_border
+        
+        # Información del proyecto
+        current_row += 2
+        ws.cell(row=current_row, column=1, value="Obra:")
+        ws.cell(row=current_row, column=2, value="ESCRIBA AQUÍ EL NOMBRE DE LA OBRA")
+        ws.cell(row=current_row, column=4, value="FECHA:")
+        ws.cell(row=current_row, column=5, value="19-sept-25")
+        ws.cell(row=current_row+1, column=4, value="QUIEN ELABORÓ:")
+        
+        current_row += 3
+        
+        # Consolidar recursos de todos los análisis
+        consolidated_resources = self._consolidate_all_resources()
+        
+        # Crear tabla por cada categoría
+        for categoria in ['MATERIALES', 'MANO DE OBRA', 'EQUIPO']:
+            if categoria in consolidated_resources:
+                current_row = self._create_categoria_insumos_table(
+                    ws, categoria, consolidated_resources[categoria], current_row,
+                    header_font, normal_font, small_font, header_fill, light_fill, blue_fill,
+                    center_align, left_align, right_align, thin_border
+                )
+        
+        # Total general
+        total_general = sum(
+            sum(recurso['valor_total'] for recurso in recursos.values())
+            for recursos in consolidated_resources.values()
+        )
+        
+        current_row += 1
+        ws.merge_cells(f'A{current_row}:D{current_row}')
+        ws.cell(row=current_row, column=1, value="TOTAL GENERAL:")
+        ws.cell(row=current_row, column=1).font = header_font
+        ws.cell(row=current_row, column=1).alignment = right_align
+        ws.cell(row=current_row, column=5, value=total_general)
+        ws.cell(row=current_row, column=5).font = header_font
+        ws.cell(row=current_row, column=5).number_format = '#,##0.00'
+        ws.cell(row=current_row, column=5).alignment = right_align
+        
+        for col in range(1, 6):
+            ws.cell(row=current_row, column=col).border = thin_border
+            ws.cell(row=current_row, column=col).fill = header_fill
+    
+    def _consolidate_all_resources(self):
+        """Consolida todos los recursos de todos los análisis, sumando cantidades duplicadas"""
+        consolidated = {
+            'MATERIALES': {},
+            'MANO DE OBRA': {},
+            'EQUIPO': {}
+        }
+        
+        # Obtener análisis únicos del presupuesto
+        analisis_list = self._get_unique_analisis_from_presupuesto()
+        
+        for analisis_data in analisis_list:
+            recursos = self._get_recursos_for_analisis(analisis_data['codigo'])
+            # IMPORTANTE: Multiplicar por la cantidad del análisis en el presupuesto
+            cantidad_analisis = analisis_data.get('cantidad', 1.0)
+            
+            for recurso in recursos:
+                categoria = recurso['categoria']
+                if categoria not in consolidated:
+                    categoria = 'MATERIALES'  # Default
+                
+                key = f"{recurso['codigo']}_{recurso['descripcion']}"
+                
+                # Cantidad real = cantidad del recurso × cantidad del análisis en presupuesto
+                cantidad_real = recurso['cantidad'] * cantidad_analisis
+                
+                if key in consolidated[categoria]:
+                    # Sumar cantidad si ya existe
+                    consolidated[categoria][key]['cantidad'] += cantidad_real
+                    # Recalcular valor total
+                    consolidated[categoria][key]['valor_total'] = (
+                        consolidated[categoria][key]['cantidad'] * 
+                        (1 + consolidated[categoria][key]['desperdicio']/100) * 
+                        consolidated[categoria][key]['precio_unitario']
+                    )
+                else:
+                    # Nuevo recurso
+                    consolidated[categoria][key] = {
+                        'codigo': recurso['codigo'],
+                        'descripcion': recurso['descripcion'],
+                        'unidad': recurso['unidad'],
+                        'cantidad': cantidad_real,  # Ya multiplicada por cantidad del análisis
+                        'desperdicio': recurso['desperdicio'],
+                        'precio_unitario': recurso['precio_unitario'],
+                        'valor_total': cantidad_real * (1 + recurso['desperdicio']/100) * recurso['precio_unitario']
+                    }
+        
+        return consolidated
+    
+    def _create_categoria_insumos_table(self, ws, categoria, recursos, start_row,
+                                       header_font, normal_font, small_font,
+                                       header_fill, light_fill, blue_fill, center_align, 
+                                       left_align, right_align, thin_border):
+        """Crea una tabla para una categoría específica de insumos"""
+        current_row = start_row
+        
+        # Header de categoría
+        ws.merge_cells(f'A{current_row}:E{current_row}')
+        ws.cell(row=current_row, column=1, value=categoria)
+        ws.cell(row=current_row, column=1).font = header_font
+        ws.cell(row=current_row, column=1).alignment = center_align
+        ws.cell(row=current_row, column=1).fill = blue_fill
+        for col in range(1, 6):
+            ws.cell(row=current_row, column=col).border = thin_border
+        current_row += 1
+        
+        # Headers de la tabla
+        headers = ["DESCRIPCIÓN", "UND", "CANT.", "VR. UNIT.", "VR.TOTAL"]
+        for col, header in enumerate(headers, 1):
+            ws.cell(row=current_row, column=col, value=header)
+            ws.cell(row=current_row, column=col).font = small_font
+            ws.cell(row=current_row, column=col).fill = light_fill
+            ws.cell(row=current_row, column=col).alignment = center_align
+            ws.cell(row=current_row, column=col).border = thin_border
+        current_row += 1
+        
+        # Datos de recursos
+        subtotal = 0
+        for recurso in recursos.values():
+            ws.cell(row=current_row, column=1, value=recurso['descripcion'])
+            ws.cell(row=current_row, column=2, value=recurso['unidad'])
+            ws.cell(row=current_row, column=3, value=recurso['cantidad'])
+            ws.cell(row=current_row, column=4, value=recurso['precio_unitario'])
+            ws.cell(row=current_row, column=5, value=recurso['valor_total'])
+            
+            subtotal += recurso['valor_total']
+            
+            # Aplicar formato
+            for col in range(1, 6):
+                ws.cell(row=current_row, column=col).font = small_font
+                ws.cell(row=current_row, column=col).border = thin_border
+                if col == 1:  # Descripción
+                    ws.cell(row=current_row, column=col).alignment = left_align
+                elif col in [3, 4, 5]:  # Cantidades y valores
+                    ws.cell(row=current_row, column=col).number_format = '#,##0.00'
+                    ws.cell(row=current_row, column=col).alignment = right_align
+                else:  # Unidad
+                    ws.cell(row=current_row, column=col).alignment = center_align
+            
+            current_row += 1
+        
+        # Subtotal
+        ws.merge_cells(f'A{current_row}:D{current_row}')
+        ws.cell(row=current_row, column=1, value=f"SUBTOTAL {categoria}:")
+        ws.cell(row=current_row, column=1).font = normal_font
+        ws.cell(row=current_row, column=1).alignment = right_align
+        ws.cell(row=current_row, column=5, value=subtotal)
+        ws.cell(row=current_row, column=5).font = normal_font
+        ws.cell(row=current_row, column=5).number_format = '#,##0.00'
+        ws.cell(row=current_row, column=5).alignment = right_align
+        
+        for col in range(1, 6):
+            ws.cell(row=current_row, column=col).border = thin_border
+            ws.cell(row=current_row, column=col).fill = light_fill
+        
+        return current_row + 2  # Espacio para la siguiente categoría
+    
+    def _get_ejemplo_recursos(self, codigo_analisis):
+        """Genera recursos de ejemplo si no se pueden obtener de la BD"""
+        # Recursos de ejemplo basados en el código del análisis
+        if "MOTOR" in codigo_analisis.upper():
+            return [
+                {
+                    'codigo': 'MOI501',
+                    'descripcion': 'MANO OBRA HIDROSANIT.1 AYUDANTE-1 OFI',
+                    'unidad': 'HC',
+                    'cantidad': 5.5,
+                    'desperdicio': 0.0,
+                    'precio_unitario': 25391.00,
+                    'categoria': 'MANO DE OBRA'
+                },
+                {
+                    'codigo': 'MQ0301',
+                    'descripcion': 'HERRAMIENTA MENOR',
+                    'unidad': 'GLB',
+                    'cantidad': 1.9,
+                    'desperdicio': 0.0,
+                    'precio_unitario': 1600.00,
+                    'categoria': 'EQUIPO'
+                },
+                {
+                    'codigo': '004837',
+                    'descripcion': 'MOTOR EL.100HP 3600RPM BOM',
+                    'unidad': 'UND',
+                    'cantidad': 1.0,
+                    'desperdicio': 0.0,
+                    'precio_unitario': 11024350.00,
+                    'categoria': 'MATERIALES'
+                }
+            ]
+        elif "BOMBA" in codigo_analisis.upper():
+            return [
+                {
+                    'codigo': 'MOI501',
+                    'descripcion': 'MANO OBRA ELECTRICAS1 AYUDANTE-1 OFI',
+                    'unidad': 'HC',
+                    'cantidad': 2.5,
+                    'desperdicio': 0.0,
+                    'precio_unitario': 33455.00,
+                    'categoria': 'MANO DE OBRA'
+                },
+                {
+                    'codigo': '004857',
+                    'descripcion': 'BOM.SUM. 15 HP LAPIC 6"',
+                    'unidad': 'UND',
+                    'cantidad': 1.0,
+                    'desperdicio': 0.0,
+                    'precio_unitario': 11008400.00,
+                    'categoria': 'MATERIALES'
+                }
+            ]
+        elif "TUB" in codigo_analisis.upper():
+            return [
+                {
+                    'codigo': 'ALU501',
+                    'descripcion': 'TUBERIA PVC 4" NOVAFORT',
+                    'unidad': 'ML',
+                    'cantidad': 1.0,
+                    'desperdicio': 5.0,
+                    'precio_unitario': 142682.00,
+                    'categoria': 'MATERIALES'
+                },
+                {
+                    'codigo': 'MOI301',
+                    'descripcion': 'MANO OBRA PLOMERIA-1 OFI',
+                    'unidad': 'HC',
+                    'cantidad': 0.5,
+                    'desperdicio': 0.0,
+                    'precio_unitario': 28500.00,
+                    'categoria': 'MANO DE OBRA'
+                }
+            ]
+        else:
+            return [
+                {
+                    'codigo': 'GENERICO',
+                    'descripcion': f'Material para {codigo_analisis}',
+                    'unidad': 'UND',
+                    'cantidad': 1.0,
+                    'desperdicio': 0.0,
+                    'precio_unitario': 100000.00,
+                    'categoria': 'MATERIALES'
+                }
+            ]
