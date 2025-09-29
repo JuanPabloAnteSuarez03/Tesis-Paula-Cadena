@@ -380,8 +380,7 @@ class PresupuestoView(QWidget):
             ("Importar CSV", self.import_csv),
             ("Importar por Texto", self.open_import_text_dialog),
             ("Exportar CSV", self.export_csv),
-            ("Exportar Excel (Template)", self.export_excel),
-            ("Exportar Excel (Desde Cero)", self.export_excel_from_scratch),
+            ("Exportar Excel", self.export_excel_from_scratch),
         ])
         
         # Añadir en orden lógico
@@ -1186,7 +1185,7 @@ class PresupuestoView(QWidget):
             self.table.setItem(position, col, empty_item)
 
     def export_csv(self):
-        """Exporta los datos del presupuesto a un archivo CSV sin incluir totales calculados."""
+        """Exporta los datos del presupuesto a un archivo CSV incluyendo datos completos de AIU."""
         filePath, _ = QFileDialog.getSaveFileName(self, "Exportar CSV", "", "CSV Files (*.csv)")
         if not filePath:
             return
@@ -1195,7 +1194,7 @@ class PresupuestoView(QWidget):
             writer = csv.writer(file)
             
             # Escribir header - sin la columna "Costo Total"
-            writer.writerow(['Item', 'Descripción', 'Unidad', 'Cantidad', 'Costo Unitario', 'Código Análisis'])
+            writer.writerow(['Item', 'Descripción', 'Unidad', 'Cantidad', 'Costo Unitario', 'Código Análisis', 'Tipo'])
 
             for row in range(self.table.rowCount()):
                 # Obtener datos de la fila
@@ -1217,17 +1216,50 @@ class PresupuestoView(QWidget):
                     else:
                         row_data.append("")
                 
-                # Agregar el código del análisis
+                # Agregar el código del análisis y tipo
                 item_with_code = self.table.item(row, 0)
                 if item_with_code and item_with_code.data(Qt.ItemDataRole.UserRole):
                     codigo_analisis = item_with_code.data(Qt.ItemDataRole.UserRole)
+                    tipo = codigo_analisis if codigo_analisis in ['chapter', 'subtotal'] else 'analysis'
                 else:
                     codigo_analisis = ""
+                    tipo = ""
                 
                 row_data.append(codigo_analisis)
+                row_data.append(tipo)
                 writer.writerow(row_data)
 
-            # ----- Bloque AIU -----
+            # ----- Bloque AIU COMPLETO -----
+            writer.writerow([])
+            writer.writerow(['=== DATOS AIU ==='])
+            
+            # Obtener datos de AIU si existen
+            if hasattr(self, 'aiu_breakdown') and self.aiu_breakdown:
+                aiu_data = self.aiu_breakdown
+                
+                # Datos principales de AIU
+                writer.writerow(['AIU_ADMIN', str(aiu_data.get('admin', 0.0))])
+                writer.writerow(['AIU_SUB_TOTAL', str(aiu_data.get('sub_total', 0.0))])
+                writer.writerow(['AIU_IMPREV', str(aiu_data.get('imprev', 0.0))])
+                writer.writerow(['AIU_UTIL', str(aiu_data.get('util', 0.0))])
+                writer.writerow(['AIU_IVA', str(aiu_data.get('iva', 0.0))])
+                writer.writerow(['AIU_IMPREV_PCT', str(aiu_data.get('imprev_pct', 0.0))])
+                writer.writerow(['AIU_UTIL_PCT', str(aiu_data.get('util_pct', 0.0))])
+                writer.writerow(['AIU_IVA_PCT', str(aiu_data.get('iva_pct', 0.0))])
+                writer.writerow(['AIU_TOTAL', str(aiu_data.get('total_aiu', 0.0))])
+                
+                # Sub-items detallados (profesionales, oficina, pólizas, estampillas)
+                if 'sub_items' in aiu_data:
+                    writer.writerow([])
+                    writer.writerow(['=== SUB-ITEMS AIU ==='])
+                    for i, sub_item in enumerate(aiu_data['sub_items']):
+                        writer.writerow([
+                            f'SUB_ITEM_{i}',
+                            sub_item.get('concepto', ''),
+                            str(sub_item.get('pct', 0.0)),
+                            str(sub_item.get('valor', 0.0))
+                        ])
+            
             writer.writerow([])  # línea en blanco
             writer.writerow(["COSTO DIRECTO", f"{self.direct_cost_total}"])
 
@@ -2508,7 +2540,9 @@ class PresupuestoView(QWidget):
             
             aiu_dict = {}
             analysis_rows = []
+            sub_items = []
             is_aiu_block = False
+            processing_sub_items = False
 
             for row in reader:
                 total_rows_processed += 1
@@ -2516,28 +2550,74 @@ class PresupuestoView(QWidget):
                     is_aiu_block = True
                     continue
                 
-                if is_aiu_block:
-                    key = row[0].strip().upper()
-                    value = row[1].replace('$', '').replace(',', '').strip() if len(row) > 1 else '0'
-                    pct = row[2].replace('%', '').strip() if len(row) > 2 else '0'
+                # Detectar secciones especiales
+                if len(row) >= 1:
+                    if row[0] == '=== SUB-ITEMS AIU ===':
+                        processing_sub_items = True
+                        continue
+                    elif row[0] == '=== DATOS AIU ===':
+                        processing_sub_items = False
+                        is_aiu_block = True
+                        continue
+                
+                # Procesar sub-items AIU
+                if processing_sub_items and len(row) >= 4 and row[0].startswith('SUB_ITEM_'):
                     try:
-                        val_f = float(value)
-                        pct_f = float(pct)
-                    except ValueError:
-                        val_f = 0.0; pct_f = 0.0
-                    
-                    if key == "COSTO DIRECTO": aiu_dict['direct_cost'] = val_f
-                    elif key == "ADMINISTRACIÓN": aiu_dict['admin'] = val_f; aiu_dict['admin_pct'] = pct_f
-                    elif key == "IMPREVISTOS": aiu_dict['imprev'] = val_f; aiu_dict['imprev_pct'] = pct_f
-                    elif key == "UTILIDAD": aiu_dict['util'] = val_f; aiu_dict['util_pct'] = pct_f
-                    elif key == "IVA UTILIDAD": aiu_dict['iva'] = val_f; aiu_dict['iva_pct'] = pct_f
-                    elif key == "TOTAL COSTOS INDIRECTOS": aiu_dict['total_aiu'] = val_f
+                        sub_items.append({
+                            'concepto': row[1],
+                            'pct': float(row[2]) if row[2] else 0.0,
+                            'valor': float(row[3]) if row[3] else 0.0
+                        })
+                    except (ValueError, IndexError):
+                        pass
+                    continue
+                
+                if is_aiu_block:
+                    # Procesar líneas AIU nuevas y antiguas
+                    if len(row) >= 2 and row[0].startswith('AIU_'):
+                        key = row[0]
+                        val = row[1]
+                        try:
+                            val_f = float(val.replace(',', '').replace('$', '').replace('%', '').strip())
+                        except:
+                            val_f = 0.0
+                        
+                        if key == "AIU_ADMIN": aiu_dict['admin'] = val_f
+                        elif key == "AIU_SUB_TOTAL": aiu_dict['sub_total'] = val_f
+                        elif key == "AIU_IMPREV": aiu_dict['imprev'] = val_f
+                        elif key == "AIU_UTIL": aiu_dict['util'] = val_f
+                        elif key == "AIU_IVA": aiu_dict['iva'] = val_f
+                        elif key == "AIU_IMPREV_PCT": aiu_dict['imprev_pct'] = val_f
+                        elif key == "AIU_UTIL_PCT": aiu_dict['util_pct'] = val_f
+                        elif key == "AIU_IVA_PCT": aiu_dict['iva_pct'] = val_f
+                        elif key == "AIU_TOTAL": aiu_dict['total_aiu'] = val_f
+                    else:
+                        # Formato anterior de AIU
+                        key = row[0].strip().upper()
+                        value = row[1].replace('$', '').replace(',', '').strip() if len(row) > 1 else '0'
+                        pct = row[2].replace('%', '').strip() if len(row) > 2 else '0'
+                        try:
+                            val_f = float(value)
+                            pct_f = float(pct)
+                        except ValueError:
+                            val_f = 0.0; pct_f = 0.0
+                        
+                        if key == "COSTO DIRECTO": aiu_dict['direct_cost'] = val_f
+                        elif key == "ADMINISTRACIÓN": aiu_dict['admin'] = val_f; aiu_dict['admin_pct'] = pct_f
+                        elif key == "IMPREVISTOS": aiu_dict['imprev'] = val_f; aiu_dict['imprev_pct'] = pct_f
+                        elif key == "UTILIDAD": aiu_dict['util'] = val_f; aiu_dict['util_pct'] = pct_f
+                        elif key == "IVA UTILIDAD": aiu_dict['iva'] = val_f; aiu_dict['iva_pct'] = pct_f
+                        elif key == "TOTAL COSTOS INDIRECTOS": aiu_dict['total_aiu'] = val_f
                 else:
                     analysis_rows.append(row)
+            
+            # Agregar sub-items al AIU dict si existen
+            if sub_items:
+                aiu_dict['sub_items'] = sub_items
 
             for row_data in analysis_rows:
                 # Lógica para añadir capítulos y análisis
-                if (len(row_data) >= 6 and row_data[5].strip().lower() == 'chapter') or ('cap' in row_data[0].lower() and row_data[0][0].isdigit()):
+                if (len(row_data) >= 7 and row_data[6].strip().lower() == 'chapter') or (len(row_data) >= 6 and row_data[5].strip().lower() == 'chapter') or ('cap' in row_data[0].lower() and row_data[0][0].isdigit()):
                     chapter_text = row_data[0]
                     if '.' in chapter_text: 
                         chapter_name = chapter_text.split('.',1)[1].strip()
@@ -2561,6 +2641,17 @@ class PresupuestoView(QWidget):
                     if col==1: 
                         item.setToolTip(val)
                     self.table.setItem(row_idx, col, item)
+                
+                # **CLAVE**: Restaurar el código del análisis en UserRole si existe
+                codigo_analisis = row_data[5] if len(row_data) > 5 else ""
+                tipo_fila = row_data[6] if len(row_data) > 6 else ""
+                
+                if codigo_analisis and tipo_fila == 'analysis':
+                    # Es un análisis real, guardar el código en UserRole
+                    item_codigo = self.table.item(row_idx, 0)
+                    if item_codigo:
+                        item_codigo.setData(Qt.ItemDataRole.UserRole, codigo_analisis)
+                        print(f"✅ Código {codigo_analisis} restaurado en fila {row_idx}")
                 
                 total_item = QTableWidgetItem()
                 total_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
