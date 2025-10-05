@@ -909,6 +909,11 @@ class AdministracionWindow(QDialog):
     def _on_del_oficina(self):
         idxs = self.tbl_oficina.selectionModel().selectedRows()
         rows = sorted([i.row() for i in idxs], reverse=True)
+        # Fallback: si no hay selección por filas, usar la fila actual
+        if not rows:
+            cur = self.tbl_oficina.currentRow()
+            if cur is not None and cur >= 0:
+                rows = [cur]
         for r in rows:
             it = self.tbl_oficina.item(r,0)
             if it and it.text().strip().lower() == 'subtotal':
@@ -919,6 +924,10 @@ class AdministracionWindow(QDialog):
     def _on_del_poliza(self):
         idxs = self.tbl_polizas.selectionModel().selectedRows()
         rows = sorted([i.row() for i in idxs], reverse=True)
+        if not rows:
+            cur = self.tbl_polizas.currentRow()
+            if cur is not None and cur >= 0:
+                rows = [cur]
         for r in rows:
             it = self.tbl_polizas.item(r,0)
             if it and it.text().strip().lower() == 'subtotal':
@@ -929,6 +938,10 @@ class AdministracionWindow(QDialog):
     def _on_del_estamp(self):
         idxs = self.tbl_estamp.selectionModel().selectedRows()
         rows = sorted([i.row() for i in idxs], reverse=True)
+        if not rows:
+            cur = self.tbl_estamp.currentRow()
+            if cur is not None and cur >= 0:
+                rows = [cur]
         for r in rows:
             it = self.tbl_estamp.item(r,0)
             if it and it.text().strip().lower() == 'subtotal':
