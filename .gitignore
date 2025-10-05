@@ -1,6 +1,2 @@
 .venv
 __pycache__/
-/data_gobernacion/recursos_obras.csv
-/data_gobernacion/recursos_unicos.csv
-/data_gobernacion/analisis_unitarios.csv
-/data_gobernacion/recursos_analisis.csv
