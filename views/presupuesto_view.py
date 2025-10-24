@@ -379,6 +379,7 @@ class PresupuestoView(QWidget):
         btn_io = make_menu_button("Importar/Exportar", [
             ("Importar CSV", self.import_csv),
             ("Importar por Texto", self.open_import_text_dialog),
+            ("Importar IFC (Materiales)", self.open_ifc_materials_dialog),
             ("Exportar CSV", self.export_csv),
             ("Exportar Excel", self.export_excel_from_scratch),
         ])
@@ -390,6 +391,15 @@ class PresupuestoView(QWidget):
         button_layout.addWidget(btn_io, 1)
         
         self.layout.addLayout(button_layout)
+
+    def open_ifc_materials_dialog(self):
+        try:
+            from .ifc_materials_dialog import IFCMaterialsDialog
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"No se pudo cargar el diálogo IFC:\n{e}")
+            return
+        dlg = IFCMaterialsDialog(self)
+        dlg.exec()
 
     def open_import_text_dialog(self):
         dialog = ImportarPorTextoDialog(self)
@@ -2596,18 +2606,18 @@ class PresupuestoView(QWidget):
                         key = row[0].strip().upper()
                         value = row[1].replace('$', '').replace(',', '').strip() if len(row) > 1 else '0'
                         pct = row[2].replace('%', '').strip() if len(row) > 2 else '0'
-                        try:
-                            val_f = float(value)
-                            pct_f = float(pct)
-                        except ValueError:
-                            val_f = 0.0; pct_f = 0.0
-                        
-                        if key == "COSTO DIRECTO": aiu_dict['direct_cost'] = val_f
-                        elif key == "ADMINISTRACIÓN": aiu_dict['admin'] = val_f; aiu_dict['admin_pct'] = pct_f
-                        elif key == "IMPREVISTOS": aiu_dict['imprev'] = val_f; aiu_dict['imprev_pct'] = pct_f
-                        elif key == "UTILIDAD": aiu_dict['util'] = val_f; aiu_dict['util_pct'] = pct_f
-                        elif key == "IVA UTILIDAD": aiu_dict['iva'] = val_f; aiu_dict['iva_pct'] = pct_f
-                        elif key == "TOTAL COSTOS INDIRECTOS": aiu_dict['total_aiu'] = val_f
+                    try:
+                        val_f = float(value)
+                        pct_f = float(pct)
+                    except ValueError:
+                        val_f = 0.0; pct_f = 0.0
+                    
+                    if key == "COSTO DIRECTO": aiu_dict['direct_cost'] = val_f
+                    elif key == "ADMINISTRACIÓN": aiu_dict['admin'] = val_f; aiu_dict['admin_pct'] = pct_f
+                    elif key == "IMPREVISTOS": aiu_dict['imprev'] = val_f; aiu_dict['imprev_pct'] = pct_f
+                    elif key == "UTILIDAD": aiu_dict['util'] = val_f; aiu_dict['util_pct'] = pct_f
+                    elif key == "IVA UTILIDAD": aiu_dict['iva'] = val_f; aiu_dict['iva_pct'] = pct_f
+                    elif key == "TOTAL COSTOS INDIRECTOS": aiu_dict['total_aiu'] = val_f
                 else:
                     analysis_rows.append(row)
             
