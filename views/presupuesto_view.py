@@ -401,8 +401,8 @@ class PresupuestoView(QWidget):
         dlg = IFCMaterialsDialog(self)
         dlg.exec()
 
-    def open_import_text_dialog(self):
-        dialog = ImportarPorTextoDialog(self)
+    def open_import_text_dialog(self, prefill_rows=None, append: bool = False):
+        dialog = ImportarPorTextoDialog(self, prefill_rows=prefill_rows)
         if dialog.exec():
             rows = dialog.result_rows()
             if not rows:
@@ -410,9 +410,10 @@ class PresupuestoView(QWidget):
             # Insertar filas como capítulos o análisis según ITEM
             self.table.blockSignals(True)
             try:
-                # Limpiar presupuesto actual y contadores
-                self.table.setRowCount(0)
-                self.chapter_counter = 0
+                # Limpiar presupuesto actual y contadores solo si no se desea anexar
+                if not append:
+                    self.table.setRowCount(0)
+                    self.chapter_counter = 0
                 for entry in rows:
                     item_str = (entry.get('item') or '').strip()
                     desc = (entry.get('descripcion') or '').strip()
@@ -489,7 +490,10 @@ class PresupuestoView(QWidget):
 
             if ask == QMessageBox.StandardButton.Yes:
                 # Recorrer ítems de análisis (no capítulos ni subtotales)
+                interrupted = False
                 for r in range(self.table.rowCount()):
+                    if interrupted:
+                        break
                     code_item = self.table.item(r, 0)
                     if not code_item:
                         continue
@@ -503,7 +507,15 @@ class PresupuestoView(QWidget):
                         continue
 
                     dlg = AnalisisMatchDialog(desc, und, parent=self)
-                    if dlg.exec():
+                    result = dlg.exec()
+                    # Si el usuario pulsó "Detener proceso" en el diálogo, abortamos el resto
+                    try:
+                        if not result and getattr(dlg, 'was_aborted', lambda: False)():
+                            interrupted = True
+                            break
+                    except Exception:
+                        pass
+                    if result:
                         sel = dlg.selected_analysis()
                         if sel:
                             try:
@@ -742,6 +754,81 @@ class PresupuestoView(QWidget):
         # Solo reconstruir inmediatamente si no estamos importando en bloque
         if trigger_rebuild:
             self.rebuild_table()
+
+    def add_ifc_rebar_analysis(self, kg_total: float):
+        """Agrega directamente el análisis de ACERO DE REFUERZO (08-08-11)
+        con la cantidad total en kilogramos extraída del IFC, sin pasar por búsqueda."""
+        try:
+            if not kg_total or kg_total <= 0:
+                return
+            self.table.blockSignals(True)
+
+            # Asegurar que exista el capítulo ACERO (IFC)
+            chapter_exists = False
+            for r in range(self.table.rowCount()):
+                it = self.table.item(r, 0)
+                if it and it.data(Qt.ItemDataRole.UserRole) == 'chapter':
+                    if (it.text() or '').strip().upper().startswith('ACERO (IFC)'):
+                        chapter_exists = True
+                        break
+            if not chapter_exists:
+                self.add_chapter_row('ACERO (IFC)', trigger_rebuild=False)
+
+            # Insertar fila de análisis al final
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+
+            # Columna 0: item (se renumerará). Guardamos el código en UserRole
+            code_item = QTableWidgetItem('...')
+            code_item.setData(Qt.ItemDataRole.UserRole, '08-08-11')
+            self.table.setItem(row, 0, code_item)
+
+            # Columna 1: descripción
+            desc_text = 'ACERO DE REFUERZO (08-08-11)'
+            desc_item = QTableWidgetItem(desc_text)
+            desc_item.setToolTip(desc_text)
+            self.table.setItem(row, 1, desc_item)
+
+            # Unidad y costo unitario desde BD (si existe)
+            und_text = 'KG'
+            cu_value = 0.0
+            try:
+                session = SessionLocal()
+                try:
+                    a = session.query(AnalisisUnitario).filter(AnalisisUnitario.codigo == '08-08-11').first()
+                    if a:
+                        try:
+                            und_text = (a.unidad or und_text).upper()
+                        except Exception:
+                            pass
+                        try:
+                            cu_value = float(getattr(a, 'total_calculado', None) or getattr(a, 'total', 0.0) or 0.0)
+                        except Exception:
+                            cu_value = 0.0
+                finally:
+                    session.close()
+            except Exception:
+                pass
+
+            # Columna 2: unidad
+            und_item = QTableWidgetItem(und_text)
+            und_item.setFlags(und_item.flags() | Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 2, und_item)
+
+            # Columna 3: cantidad
+            qty_item = QTableWidgetItem(f"{kg_total:.2f}")
+            qty_item.setFlags(qty_item.flags() | Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 3, qty_item)
+
+            # Columna 4: costo unitario
+            cu_item = QTableWidgetItem(f"${cu_value:,.2f}")
+            self.table.setItem(row, 4, cu_item)
+
+            # Calcular total y renumerar
+            self.update_row_total(row)
+            self.rebuild_table_safe()
+        finally:
+            self.table.blockSignals(False)
 
     def delete_selected_row(self):
         """Elimina la fila seleccionada del presupuesto."""
@@ -2602,15 +2689,15 @@ class PresupuestoView(QWidget):
                         elif key == "AIU_IVA_PCT": aiu_dict['iva_pct'] = val_f
                         elif key == "AIU_TOTAL": aiu_dict['total_aiu'] = val_f
                     else:
-                        # Formato anterior de AIU
+                            # Formato anterior de AIU
                         key = row[0].strip().upper()
                         value = row[1].replace('$', '').replace(',', '').strip() if len(row) > 1 else '0'
                         pct = row[2].replace('%', '').strip() if len(row) > 2 else '0'
-                    try:
-                        val_f = float(value)
-                        pct_f = float(pct)
-                    except ValueError:
-                        val_f = 0.0; pct_f = 0.0
+                        try:
+                            val_f = float(value)
+                            pct_f = float(pct)
+                        except ValueError:
+                            val_f = 0.0; pct_f = 0.0
                     
                     if key == "COSTO DIRECTO": aiu_dict['direct_cost'] = val_f
                     elif key == "ADMINISTRACIÓN": aiu_dict['admin'] = val_f; aiu_dict['admin_pct'] = pct_f

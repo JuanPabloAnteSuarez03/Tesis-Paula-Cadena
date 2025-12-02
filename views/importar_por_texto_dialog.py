@@ -19,7 +19,7 @@ class ImportarPorTextoDialog(QDialog):
     - Devuelve una lista de diccionarios al aceptar.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, prefill_rows=None):
         super().__init__(parent)
         self.setWindowTitle("Importar por Texto")
         self.resize(900, 550)
@@ -99,6 +99,34 @@ class ImportarPorTextoDialog(QDialog):
             QPushButton:pressed { background-color: #005bb5; }
             """
         )
+
+        # Prefill optional rows (list of dicts with keys: item, descripcion, unidad, cantidad)
+        try:
+            if prefill_rows:
+                rows = list(prefill_rows)
+                needed = max(20, len(rows))
+                self.table.setRowCount(needed)
+                for r_idx, r in enumerate(rows):
+                    item = str(r.get('item', '') or '')
+                    desc = str(r.get('descripcion', '') or '')
+                    und = str(r.get('unidad', '') or '')
+                    cant = r.get('cantidad', '')
+                    if isinstance(cant, float):
+                        # normalize decimal with dot
+                        cant = f"{cant}"
+                    else:
+                        cant = str(cant or '')
+                    col_values = [item, desc, und, cant]
+                    for c_idx, value in enumerate(col_values):
+                        qitem = QTableWidgetItem(value)
+                        if c_idx in (0, 3):
+                            qitem.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
+                        if c_idx == 1 and value:
+                            qitem.setToolTip(value)
+                        self.table.setItem(r_idx, c_idx, qitem)
+        except Exception:
+            # Do not fail dialog if prefill has issues
+            pass
 
     def showEvent(self, event):
         super().showEvent(event)

@@ -58,12 +58,16 @@ class AnalisisMatchDialog(QDialog):
         actions = QHBoxLayout()
         actions.addStretch(1)
         self.btn_accept = QPushButton("Usar seleccionado")
+        self.btn_stop = QPushButton("Detener proceso")
         self.btn_cancel = QPushButton("Cancelar")
         actions.addWidget(self.btn_accept)
+        actions.addWidget(self.btn_stop)
         actions.addWidget(self.btn_cancel)
         layout.addLayout(actions)
 
+        self._aborted = False
         self.btn_accept.clicked.connect(self._on_accept)
+        self.btn_stop.clicked.connect(self._on_abort_all)
         self.btn_cancel.clicked.connect(self.reject)
         self.table.cellDoubleClicked.connect(lambda r, c: self._on_accept())
 
@@ -87,6 +91,9 @@ class AnalisisMatchDialog(QDialog):
     def selected_analysis(self):
         return self._selected
 
+    def was_aborted(self) -> bool:
+        return bool(getattr(self, '_aborted', False))
+
     # --- Internos ---
     def _on_accept(self):
         row = self.table.currentRow()
@@ -107,6 +114,11 @@ class AnalisisMatchDialog(QDialog):
             'costo_unitario': cu,
         }
         self.accept()
+
+    def _on_abort_all(self):
+        # Marca interrupción global para el proceso de búsqueda por texto
+        self._aborted = True
+        self.reject()
 
     def _text(self, row, col):
         it = self.table.item(row, col)

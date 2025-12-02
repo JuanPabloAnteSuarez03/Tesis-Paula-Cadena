@@ -854,7 +854,7 @@ class AdministracionWindow(QDialog):
             'total_aiu': getattr(self, '_current_aiu', 0.0)
         })
         if not getattr(self, 'embedded', False):
-            self.accept()
+            self.close()
 
 
     def _reload_based_on_checkbox(self):

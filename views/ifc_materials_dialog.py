@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFileDialog,
-    QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox
+    QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, QTabWidget
 )
 from PyQt6.QtCore import Qt
 
@@ -27,7 +27,23 @@ class IFCMaterialsDialog(QDialog):
         info.setWordWrap(True)
         layout.addWidget(info)
 
-        # Tabla de Acero de Refuerzo (única tabla solicitada)
+        # Pestañas
+        self.tabs = QTabWidget(self)
+
+        # Tabla de Concreto
+        self.concrete_table = QTableWidget(self)
+        self.concrete_table.setColumnCount(5)
+        self.concrete_table.setHorizontalHeaderLabels([
+            "Categoría de anfitrión", "Tipo", "Longitud (m)", "Área (m²)", "Volumen (m³)"
+        ])
+        cheader = self.concrete_table.horizontalHeader()
+        cheader.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        cheader.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        cheader.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        cheader.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        cheader.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+
+        # Tabla de Acero de Refuerzo
         self.rebar_table = QTableWidget(self)
         self.rebar_table.setColumnCount(8)
         self.rebar_table.setHorizontalHeaderLabels([
@@ -43,22 +59,21 @@ class IFCMaterialsDialog(QDialog):
         rheader.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         rheader.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
         rheader.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
-        layout.addWidget(self.rebar_table)
+        self.tabs.addTab(self.concrete_table, "Concreto")
+        self.tabs.addTab(self.rebar_table, "Acero (Rebar)")
+        layout.addWidget(self.tabs)
 
         # Botones
         btns = QHBoxLayout()
         btn_open = QPushButton("Abrir IFC…")
-        btn_export_rebar = QPushButton("Exportar CSV acero…")
-        btn_export_rebar_cons = QPushButton("Exportar CSV acero (consolidado)…")
+        btn_generate = QPushButton("Generar ítems…")
         btn_close = QPushButton("Cerrar")
         btn_open.clicked.connect(self._open_ifc)
-        btn_export_rebar.clicked.connect(self._export_rebar_csv)
-        btn_export_rebar_cons.clicked.connect(self._export_rebar_csv_consolidated)
+        btn_generate.clicked.connect(self._generate_items_from_ifc)
         btn_close.clicked.connect(self.accept)
         btns.addWidget(btn_open)
         btns.addStretch(1)
-        btns.addWidget(btn_export_rebar)
-        btns.addWidget(btn_export_rebar_cons)
+        btns.addWidget(btn_generate)
         btns.addWidget(btn_close)
         layout.addLayout(btns)
 
@@ -80,7 +95,114 @@ class IFCMaterialsDialog(QDialog):
 
         self._populate_from_model(model)
 
+    def _generate_items_from_ifc(self):
+        """
+        Consolida los datos actuales y abre 'Importar por Texto' prellenado:
+        - ACERO: un ítem único con el total de Kg del proyecto (código 08-08-11 en la descripción).
+        - CONCRETO: un ítem por cada 'Tipo' único (limpiando el sufijo numérico), cantidad en m3.
+        """
+        # 1) Total de acero (Kg)
+        total_kg = 0.0
+        try:
+            for r in range(self.rebar_table.rowCount()):
+                # Omitir fila de total del proyecto si existe
+                c0 = self.rebar_table.item(r, 0)
+                if c0 and str(c0.text()).upper().startswith("TOTAL KILOS"):
+                    continue
+                c_kg = self.rebar_table.item(r, 7)  # Peso total por elemento Kg
+                if not c_kg:
+                    continue
+                txt = c_kg.text().strip()
+                try:
+                    total_kg += float(txt.replace(',', '.'))
+                except Exception:
+                    continue
+            # Fallback: si sigue en 0, intentar leer la fila de total del proyecto
+            if (not total_kg) or total_kg <= 0:
+                for r in range(self.rebar_table.rowCount()):
+                    c0 = self.rebar_table.item(r, 0)
+                    if c0 and str(c0.text()).upper().startswith("TOTAL KILOS"):
+                        c_last = self.rebar_table.item(r, 7)
+                        if c_last:
+                            try:
+                                total_kg = float(c_last.text().strip().replace(',', '.'))
+                            except Exception:
+                                pass
+                        break
+        except Exception:
+            total_kg = 0.0
+
+        # 2) Concretos por tipo único (m3)
+        import re
+        def clean_type(s: str) -> str:
+            s = str(s or "")
+            m = re.match(r'^(.*?):\s*\d+\s*$', s)
+            if m:
+                return m.group(1)
+            return re.sub(r':\s*\d+\s*$', '', s)
+
+        vol_by_type = {}
+        try:
+            for r in range(self.concrete_table.rowCount()):
+                t_item = self.concrete_table.item(r, 1)  # Tipo
+                v_item = self.concrete_table.item(r, 4)  # Volumen (m3)
+                ttxt = t_item.text().strip() if t_item else ""
+                if not ttxt or ttxt.upper().startswith("TOTAL"):
+                    continue
+                ctype = clean_type(ttxt)
+                vtxt = v_item.text().strip() if v_item else ""
+                try:
+                    v = float(vtxt.replace(',', '.'))
+                except Exception:
+                    continue
+                vol_by_type[ctype] = vol_by_type.get(ctype, 0.0) + v
+        except Exception:
+            vol_by_type = {}
+
+        # 3) Preparar filas para Importar por Texto
+        prefill_rows = []
+        # Agregar acero directo al presupuesto (no en búsqueda por texto)
+        try:
+            parent = self.parent()
+            if total_kg > 0 and hasattr(parent, 'add_ifc_rebar_analysis'):
+                parent.add_ifc_rebar_analysis(round(total_kg, 2))
+        except Exception:
+            pass
+
+        if vol_by_type:
+            prefill_rows.append({'item': '1', 'descripcion': 'CONCRETO (IFC)', 'unidad': '', 'cantidad': ''})
+            idx = 1
+            for key in sorted(vol_by_type.keys()):
+                prefill_rows.append({
+                    'item': f"1.{idx}",
+                    'descripcion': key,
+                    'unidad': 'M3',
+                    'cantidad': round(vol_by_type[key], 3),
+                })
+                idx += 1
+
+        # Si no hay concreto por importar, terminar aquí
+        if not prefill_rows:
+            if total_kg > 0:
+                QMessageBox.information(self, "Agregado", "Se agregó el ítem de ACERO DE REFUERZO al presupuesto.")
+            else:
+                QMessageBox.information(self, "Sin datos", "No hay datos de concreto o acero para enviar.")
+            return
+
+        # 4) Abrir Importar por Texto del padre (Presupuesto) con datos prellenados
+        try:
+            parent = self.parent()
+            if hasattr(parent, "open_import_text_dialog"):
+                parent.open_import_text_dialog(prefill_rows=prefill_rows, append=True)
+            else:
+                from .importar_por_texto_dialog import ImportarPorTextoDialog
+                dlg = ImportarPorTextoDialog(self, prefill_rows=prefill_rows)
+                dlg.exec()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"No se pudo abrir Importar por Texto:\n{e}")
+
     def _populate_from_model(self, ifc):
+        self.concrete_table.setRowCount(0)
         self.rebar_table.setRowCount(0)
 
         # Escalas de unidades → normalizamos a m, m2, m3 y kg
@@ -98,23 +220,7 @@ class IFCMaterialsDialog(QDialog):
                 self.table.setItem(r, c, item)
 
         def get_qto(elem, names):
-            for rel in (elem.IsDefinedBy or []):
-                if rel.is_a("IfcRelDefinesByProperties"):
-                    pdef = rel.RelatingPropertyDefinition
-                    if pdef and pdef.is_a("IfcElementQuantity"):
-                        for q in (pdef.Quantities or []):
-                            if q.Name in names:
-                                if q.is_a("IfcQuantityArea"):
-                                    return float(q.AreaValue) * area_scale
-                                if q.is_a("IfcQuantityVolume"):
-                                    return float(q.VolumeValue) * volume_scale
-                                if q.is_a("IfcQuantityLength"):
-                                    return float(q.LengthValue) * length_scale
-                                if q.is_a("IfcQuantityWeight"):
-                                    return float(q.WeightValue) * mass_scale
-                                if q.is_a("IfcQuantityCount"):
-                                    return float(q.CountValue)
-            return None
+            return self._get_qto(elem, names, length_scale, area_scale, volume_scale, mass_scale)
 
         def get_material_layers(elem):
             for rel in (elem.HasAssociations or []):
@@ -136,6 +242,12 @@ class IFCMaterialsDialog(QDialog):
                         consts = m.MaterialConstituents or []
                         return [{"name": (c.Material.Name if c.Material else None), "thickness": None} for c in consts]
             return []
+
+        # Poblar tabla de concreto
+        try:
+            self._populate_concrete_from_model(ifc, length_scale, area_scale, volume_scale, mass_scale)
+        except Exception:
+            pass
 
         # Poblar tabla de acero de refuerzo
         try:
@@ -187,6 +299,319 @@ class IFCMaterialsDialog(QDialog):
             w.writerow(["Material", "Unidad", "Cantidad"])
             for (mat, unit), qty in sorted(totals.items()):
                 w.writerow([mat, unit, f"{qty}"])
+
+    # ==== Concreto ====
+    def _populate_concrete_from_model(self, ifc, length_scale: float, area_scale: float, volume_scale: float, mass_scale: float):
+        # Helpers para edificio y nivel
+        # Ya no usamos edificio/nivel; mantenemos la función por compatibilidad si fuera necesario.
+        def get_building_and_level(elem):
+            return "", ""
+
+        def _clean_type_text(text):
+            try:
+                import re
+                s = str(text or "")
+                # Mantener prefijo (p. ej., 'Basic Wall:'), solo quitar sufijo numérico ':123456'
+                m = re.match(r'^(.*?):\s*\d+\s*$', s)
+                if m:
+                    return m.group(1)
+                return re.sub(r':\s*\d+\s*$', '', s)
+            except Exception:
+                return str(text)
+
+        def elem_type_name(elem):
+            # Nombre del tipo si existe, sino Name del elemento
+            try:
+                for rel in (getattr(elem, 'IsTypedBy', None) or []):
+                    t = rel.RelatingType
+                    if t and getattr(t, 'Name', None):
+                        return _clean_type_text(t.Name)
+            except Exception:
+                pass
+            try:
+                return _clean_type_text(getattr(elem, 'Name', '') or '')
+            except Exception:
+                return ''
+
+        def host_category(elem):
+            et = elem.is_a()
+            if et in { 'IfcFooting', 'IfcPile' }:
+                return 'Cimentación estructural'
+            if et == 'IfcColumn':
+                return 'Pilar estructural'
+            if et in { 'IfcStair', 'IfcStairFlight' }:
+                return 'Escaleras'
+            # Slab, Beam, Wall, etc.
+            return 'Armazón estructural'
+
+        # Elementos de concreto típicos
+        element_types = [
+            'IfcFooting','IfcPile','IfcSlab','IfcWall','IfcBeam','IfcColumn','IfcStair','IfcStairFlight'
+        ]
+
+        # Detectar elementos de acero estructural para excluirlos del listado de Concreto
+        def _collect_material_names(elem):
+            names = []
+            try:
+                for rel in (getattr(elem, 'HasAssociations', None) or []):
+                    if rel.is_a('IfcRelAssociatesMaterial'):
+                        m = rel.RelatingMaterial
+                        if not m:
+                            continue
+                        if m.is_a('IfcMaterial'):
+                            if getattr(m, 'Name', None):
+                                names.append(str(m.Name))
+                        elif m.is_a('IfcMaterialLayerSetUsage'):
+                            layers = getattr(m.ForLayerSet, 'MaterialLayers', None) or []
+                            for lyr in layers:
+                                mat = getattr(lyr, 'Material', None)
+                                if mat and getattr(mat, 'Name', None):
+                                    names.append(str(mat.Name))
+                        elif m.is_a('IfcMaterialLayerSet'):
+                            layers = getattr(m, 'MaterialLayers', None) or []
+                            for lyr in layers:
+                                mat = getattr(lyr, 'Material', None)
+                                if mat and getattr(mat, 'Name', None):
+                                    names.append(str(mat.Name))
+                        elif m.is_a('IfcMaterialConstituentSet'):
+                            consts = getattr(m, 'MaterialConstituents', None) or []
+                            for c in consts:
+                                mat = getattr(c, 'Material', None)
+                                if mat and getattr(mat, 'Name', None):
+                                    names.append(str(mat.Name))
+            except Exception:
+                pass
+            return [n for n in names if n]
+
+        steel_keywords = {
+            'ipe','ipn','hea','heb','hem','upn','steel','acero',
+            'h_perfiles','h-perfiles','perfil h','h perfiles','viga i','i-beam','h-beam','wide flange','steel deck'
+        }
+
+        def _is_stair(elem):
+            try:
+                return elem.is_a('IfcStair') or elem.is_a('IfcStairFlight')
+            except Exception:
+                return False
+
+        # Sumar QTO de componentes (recursivo en la cadena de agregados)
+        def _sum_child_qto(elem, names, _seen=None):
+            try:
+                if _seen is None:
+                    _seen = set()
+                if id(elem) in _seen:
+                    return None
+                _seen.add(id(elem))
+                total = 0.0
+                found_any = False
+                for rel in (getattr(elem, 'IsDecomposedBy', None) or []):
+                    if rel.is_a('IfcRelAggregates'):
+                        for ch in (getattr(rel, 'RelatedObjects', None) or []):
+                            # Valor directo en el hijo
+                            val = self._get_qto(ch, names, length_scale, area_scale, volume_scale, mass_scale)
+                            if val is not None:
+                                total += float(val)
+                                found_any = True
+                            # Recursión en nietos
+                            sub = _sum_child_qto(ch, names, _seen)
+                            if sub not in (None, 0):
+                                total += float(sub)
+                                found_any = True
+                return total if found_any else None
+            except Exception:
+                return None
+
+        # Longitud como IfcPositiveLengthMeasure en Psets (instancia o tipo)
+        def get_positive_length(elem):
+            try:
+                for rel in (getattr(elem, 'IsDefinedBy', None) or []):
+                    if rel.is_a('IfcRelDefinesByProperties'):
+                        pdef = rel.RelatingPropertyDefinition
+                        if pdef and pdef.is_a('IfcPropertySet'):
+                            for p in (pdef.HasProperties or []):
+                                if p.is_a('IfcPropertySingleValue'):
+                                    nv = getattr(p, 'NominalValue', None)
+                                    if nv is not None and getattr(nv, 'is_a', lambda *_: False)('IfcPositiveLengthMeasure'):
+                                        try:
+                                            return float(getattr(nv, 'wrappedValue', None)) * length_scale
+                                        except Exception:
+                                            pass
+            except Exception:
+                pass
+            try:
+                for rel in (getattr(elem, 'IsTypedBy', None) or []):
+                    t = rel.RelatingType
+                    if not t:
+                        continue
+                    for pset in (getattr(t, 'HasPropertySets', None) or []):
+                        if pset.is_a('IfcPropertySet'):
+                            for p in (pset.HasProperties or []):
+                                if p.is_a('IfcPropertySingleValue'):
+                                    nv = getattr(p, 'NominalValue', None)
+                                    if nv is not None and getattr(nv, 'is_a', lambda *_: False)('IfcPositiveLengthMeasure'):
+                                        try:
+                                            return float(getattr(nv, 'wrappedValue', None)) * length_scale
+                                        except Exception:
+                                            pass
+            except Exception:
+                pass
+            return None
+
+        rows = []
+        for et in element_types:
+            for elem in ifc.by_type(et):
+                # Excluir vigas/elementos de acero estructural (IPE, HEA, HEB, etc.) del listado de Concreto
+                etype_text = (elem_type_name(elem) or '')
+                objtype_text = str(getattr(elem, 'ObjectType', '') or '')
+                mats_text = ' '.join(_collect_material_names(elem))
+                txt_all = f"{etype_text} {objtype_text} {mats_text}".lower()
+                if any(k in txt_all for k in steel_keywords):
+                    continue
+                # Volumen: sólo GrossVolume / NetVolume
+                v = self._get_qto(
+                    elem,
+                    { 'GrossVolume', 'NetVolume' },
+                    length_scale, area_scale, volume_scale, mass_scale
+                )
+                # Fallback específico para escaleras: algunos modelos usan 'Volume'
+                if v in (None, 0) and _is_stair(elem):
+                    v_alt = self._get_qto(elem, { 'Volume', 'BodyVolume' }, length_scale, area_scale, volume_scale, mass_scale)
+                    if v_alt not in (None, 0):
+                        v = v_alt
+                if v in (None, 0):
+                    # Para elementos compuestos (p.ej. IfcStair), sumar volumen desde sus componentes
+                    v_comp = _sum_child_qto(elem, { 'GrossVolume', 'NetVolume', 'Volume', 'BodyVolume' })
+                    if v_comp not in (None, 0):
+                        v = v_comp
+                # Área: CrossSectionArea / OuterSurfaceArea, con respaldo mínimo a GrossArea y GrossFootprintArea
+                a = self._get_qto(
+                    elem,
+                    { 'CrossSectionArea', 'OuterSurfaceArea', 'GrossArea', 'GrossFootprintArea' },
+                    length_scale, area_scale, volume_scale, mass_scale
+                )
+                # Fallback área para escaleras
+                if a in (None, 0) and _is_stair(elem):
+                    a_alt = self._get_qto(elem, { 'NetArea', 'Area', 'SideArea' }, length_scale, area_scale, volume_scale, mass_scale)
+                    if a_alt not in (None, 0):
+                        a = a_alt
+                if a in (None, 0):
+                    a_comp = _sum_child_qto(elem, { 'CrossSectionArea', 'OuterSurfaceArea', 'GrossArea', 'GrossFootprintArea', 'NetArea', 'Area', 'SideArea' })
+                    if a_comp not in (None, 0):
+                        a = a_comp
+                # Longitud: únicamente IfcPositiveLengthMeasure en Psets
+                l = get_positive_length(elem)
+                # Si no hay longitud pero sí volumen y área, derivar L = V / A
+                if (l is None or l == 0) and (a not in (None, 0)) and (v not in (None, 0)):
+                    try:
+                        l = float(v) / float(a)
+                    except Exception:
+                        pass
+                # Si sigue faltando volumen en escaleras, aproximar con área de sección × longitud
+                if _is_stair(elem) and (v in (None, 0)) and (l not in (None, 0)):
+                    a_section = self._get_qto(elem, { 'CrossSectionArea' }, length_scale, area_scale, volume_scale, mass_scale)
+                    if a_section not in (None, 0):
+                        try:
+                            v = float(a_section) * float(l)
+                        except Exception:
+                            pass
+
+                bld, lvl = get_building_and_level(elem)
+                rows.append({
+                    'bld': bld,
+                    'lvl': lvl,
+                    'cat': host_category(elem),
+                    'type': elem_type_name(elem),
+                    'len': l,
+                    'area': a,
+                    'vol': v,
+                })
+
+        # Orden solo por categoría
+        rows.sort(key=lambda r: (r['cat'], r['type']))
+
+        # Escribir filas y subtotales por nivel
+        def write_row(vals):
+            r = self.concrete_table.rowCount()
+            self.concrete_table.insertRow(r)
+            for c, v in enumerate(vals):
+                item = QTableWidgetItem("" if v is None else str(v))
+                item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
+                self.concrete_table.setItem(r, c, item)
+
+        total_project = 0.0
+        i = 0
+        current_cat = None
+        cat_subtotal = 0.0
+        while i < len(rows):
+            r = rows[i]
+            if r['cat'] != current_cat:
+                if current_cat is not None:
+                    write_row(["", "", "", "", f"{cat_subtotal:.2f}"])
+                    total_project += cat_subtotal
+                    cat_subtotal = 0.0
+                current_cat = r['cat']
+                # Encabezado de categoría
+                write_row([current_cat, "", "", "", ""])
+            # Fila elemento
+            write_row([
+                r['cat'], _clean_type_text(r['type']),
+                (f"{float(r['len']):.3f}" if r['len'] is not None else "0.000"),
+                (f"{float(r['area']):.3f}" if r['area'] is not None else "0.000"),
+                (f"{float(r['vol']):.3f}" if r['vol'] is not None else "0.000")
+            ])
+            try:
+                cat_subtotal += float(r['vol'] or 0.0)
+            except Exception:
+                pass
+            i += 1
+        # Cerrar última categoría
+        if current_cat is not None:
+            write_row(["", "", "", "", f"{cat_subtotal:.2f}"])
+            total_project += cat_subtotal
+
+        # Fila total proyecto
+        write_row(["TOTAL PROYECTO", "", "", "", f"{total_project:.2f}"])
+
+    def _export_concrete_csv(self):
+        if self.concrete_table.rowCount() == 0:
+            QMessageBox.information(self, "Exportar", "No hay datos de concreto para exportar.")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Exportar CSV concreto", "concreto_ifc.csv", "CSV Files (*.csv)")
+        if not path:
+            return
+        with open(path, 'w', newline='', encoding='utf-8') as f:
+            w = csv.writer(f)
+            headers = [self.concrete_table.horizontalHeaderItem(i).text() for i in range(self.concrete_table.columnCount())]
+            w.writerow(headers)
+            for r in range(self.concrete_table.rowCount()):
+                row = []
+                for c in range(self.concrete_table.columnCount()):
+                    it = self.concrete_table.item(r, c)
+                    row.append(it.text() if it else "")
+                w.writerow(row)
+
+    def _export_concrete_csv_consolidated(self):
+        if self.concrete_table.rowCount() == 0:
+            QMessageBox.information(self, "Exportar", "No hay datos de concreto para exportar.")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Exportar CSV concreto (consolidado)", "concreto_ifc_consolidado.csv", "CSV Files (*.csv)")
+        if not path:
+            return
+        # Consolidar por categoría
+        totals = {}
+        for r in range(self.concrete_table.rowCount()):
+            cat = (self.concrete_table.item(r, 0).text() if self.concrete_table.item(r, 0) else "").strip()
+            vol_text = (self.concrete_table.item(r, 4).text() if self.concrete_table.item(r, 4) else "").strip()
+            try:
+                vol = float(vol_text.replace(',', '.'))
+            except Exception:
+                continue
+            totals[cat] = totals.get(cat, 0.0) + vol
+        with open(path, 'w', newline='', encoding='utf-8') as f:
+            w = csv.writer(f)
+            w.writerow(["Categoría de anfitrión", "Volumen (m3)"])
+            for cat, v in sorted(totals.items()):
+                w.writerow([cat, f"{v:.2f}"])
 
     def _get_length_scale_m(self, ifc):
         try:
@@ -307,6 +732,27 @@ class IFCMaterialsDialog(QDialog):
     # ==========================
     #   Rebar (Acero de refuerzo)
     # ==========================
+    def _get_qto(self, elem, names, length_scale: float, area_scale: float, volume_scale: float, mass_scale: float):
+        try:
+            for rel in (getattr(elem, 'IsDefinedBy', None) or []):
+                if rel.is_a("IfcRelDefinesByProperties"):
+                    pdef = rel.RelatingPropertyDefinition
+                    if pdef and pdef.is_a("IfcElementQuantity"):
+                        for q in (pdef.Quantities or []):
+                            if q.Name in names:
+                                if q.is_a("IfcQuantityArea"):
+                                    return float(q.AreaValue) * area_scale
+                                if q.is_a("IfcQuantityVolume"):
+                                    return float(q.VolumeValue) * volume_scale
+                                if q.is_a("IfcQuantityLength"):
+                                    return float(q.LengthValue) * length_scale
+                                if q.is_a("IfcQuantityWeight"):
+                                    return float(q.WeightValue) * mass_scale
+                                if q.is_a("IfcQuantityCount"):
+                                    return float(q.CountValue)
+        except Exception:
+            pass
+        return None
     def _populate_rebar_from_model(self, ifc):
         # Unidades
         length_scale = self._get_length_scale_m(ifc)
@@ -320,6 +766,20 @@ class IFCMaterialsDialog(QDialog):
             }
             # Redondeo al entero más cercano para emparejar
             return mapping.get(int(round(d)), f"Ø{d:.0f}mm")
+
+        # Texto en pulgadas por número de varilla (ACI)
+        number_to_inch_text = {
+            "#2": '1/4\"',
+            "#3": '3/8\"',
+            "#4": '1/2\"',
+            "#5": '5/8\"',
+            "#6": '3/4\"',
+            "#7": '7/8\"',
+            "#8": '1\"',
+            "#9": '1 1/8\"',
+            "#10": '1 1/4\"',
+            "#11": '1 3/8\"',
+        }
 
         # Fórmula estándar de peso lineal del acero (kg/m): 0.006165 * d^2 con d en mm
         def kg_per_m_from_diameter_mm(d):
@@ -335,6 +795,10 @@ class IFCMaterialsDialog(QDialog):
                     ptype = getattr(host, 'PredefinedType', None)
                     if str(ptype) in {"BASESLAB", "FOOTING"}:
                         return "Cimentación estructural"
+                if htype == "IfcColumn":
+                    return "Pilar estructural"
+                if htype in {"IfcStair", "IfcStairFlight"}:
+                    return "Escaleras"
                 return "Armazón estructural"
             except Exception:
                 return "Armazón estructural"
@@ -562,12 +1026,18 @@ class IFCMaterialsDialog(QDialog):
             if not text:
                 return None
             t = str(text).lower()
-            if ('foundation' in t) or ('footing' in t) or ('ciment' in t) or ('base' in t):
+            # Revit exports we found in IFC: 'Structural Foundation', 'Structural Framing', 'Structural Column', 'Stairs', 'Floor', 'Wall'
+            if ('structural foundation' in t) or ('foundation' in t) or ('footing' in t):
                 return "Cimentación estructural"
-            if ('framing' in t) or ('beam' in t) or ('column' in t) or ('wall' in t) or ('slab' in t) or ('floor' in t) or ('structural' in t):
+            if ('structural column' in t) or ('column' in t):
+                return "Pilar estructural"
+            if ('stairs' in t) or ('stair' in t):
+                return "Escaleras"
+            if ('structural framing' in t) or ('framing' in t) or ('beam' in t):
                 return "Armazón estructural"
-            if ('steel' in t) or ('metal' in t):
-                return "Estructura metálica"
+            # Fallbacks from building elements that could appear as host categories
+            if ('floor' in t) or ('slab' in t) or ('wall' in t):
+                return "Armazón estructural"
             return None
 
         # Recolectar barras
@@ -580,6 +1050,11 @@ class IFCMaterialsDialog(QDialog):
                 or _get_pset_string_from_type(rb, {"Host Category", "HostCategory", "Rebar Host Category", "Category"})
                 or _get_group_pset_string_from_assignments(rb, {"Host Category", "HostCategory", "Rebar Host Category", "Category"})
             )
+            if not host_cat_text and host:
+                host_cat_text = (
+                    _get_pset_string_from_obj(host, {"Host Category", "HostCategory", "Category"})
+                    or _get_pset_string_from_type(host, {"Host Category", "HostCategory", "Category"})
+                )
             cat = _map_category_text_to_spanish(host_cat_text) or map_host_to_spanish_category(host)
             guid = getattr(rb, 'GlobalId', '')
             # Longitud: tomar del QTO si existe, si no, usar nominal length
@@ -714,12 +1189,20 @@ class IFCMaterialsDialog(QDialog):
             length_mm = length_m * 1000.0 if length_m is not None else None
             total_kg = (kgpm * length_m * qty_bars) if (kgpm and length_m) else None
 
+            # Construir texto de diámetro y filtrar elementos con diámetro en mm
+            if not inch_txt and num_bar in number_to_inch_text:
+                inch_txt = number_to_inch_text[num_bar]
+            diam_str = inch_txt if inch_txt else (f"{dia_mm:.0f} mm" if dia_mm else "")
+            if diam_str and "mm" in diam_str.lower():
+                # Omitir filas cuyo diámetro está expresado en mm
+                continue
+
             rows.append({
                 "categoria": cat,
                 "cantidad": qty_bars,
                 "long_mm": length_mm,
                 "long_m": length_m,
-                "diam": (inch_txt if inch_txt else (f"{dia_mm:.0f} mm" if dia_mm else "")),
+                "diam": diam_str,
                 "num": num_bar,
                 "kgpm": (round(kgpm, 3) if kgpm else None),
                 "kg_total": (round(total_kg, 2) if total_kg is not None else None),
@@ -740,6 +1223,20 @@ class IFCMaterialsDialog(QDialog):
                 item = QTableWidgetItem(str(val))
                 item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
                 self.rebar_table.setItem(r, c, item)
+
+        # Fila de TOTAL DE KILOS DEL PROYECTO
+        try:
+            grand_kg = sum((r.get("kg_total") or 0.0) for r in rows)
+            r = self.rebar_table.rowCount()
+            self.rebar_table.insertRow(r)
+            total_label = "TOTAL KILOS DEL PROYECTO"
+            values = [total_label, "", "", "", "", "", "", f"{grand_kg:.2f}"]
+            for c, val in enumerate(values):
+                item = QTableWidgetItem(str(val))
+                item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
+                self.rebar_table.setItem(r, c, item)
+        except Exception:
+            pass
 
     def _export_rebar_csv(self):
         if self.rebar_table.rowCount() == 0:
