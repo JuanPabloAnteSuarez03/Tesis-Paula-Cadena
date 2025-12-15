@@ -182,92 +182,98 @@ class PresupuestoView(QWidget):
                 pass
 
             # ---- Mejorar formato de filas finales: Valor Total, Plazo, Firma ----
-            def _find_row_by_labels(sheet, labels: list[str]):
-                Ls = [_norm(x) for x in labels]
-                for rr in range(1, sheet.max_row + 1):
-                    for cc in range(1, min(12, sheet.max_column or 12) + 1):
-                        v = sheet.cell(row=rr, column=cc).value
-                        if isinstance(v, str) and any(lbl in _norm(v) for lbl in Ls):
-                            return rr
-                return None
+            # Solo si existe una hoja de presupuesto cargada (ws_ppto); si no, saltar seguro
+            if 'ws_ppto' not in locals():
+                # No hay hoja cargada en este contexto; omitir formateos especiales
+                ws_ppto = None
+            if ws_ppto:
+                def _find_row_by_labels(sheet, labels: list[str]):
+                    Ls = [_norm(x) for x in labels]
+                    for rr in range(1, sheet.max_row + 1):
+                        for cc in range(1, min(12, sheet.max_column or 12) + 1):
+                            v = sheet.cell(row=rr, column=cc).value
+                            if isinstance(v, str) and any(lbl in _norm(v) for lbl in Ls):
+                                return rr
+                    return None
 
             header_fill = XLFill(fill_type='solid', start_color='FFEFEFEF', end_color='FFEFEFEF')
             bold_font = XLFont(bold=True)
             medium = XLSide(style='medium', color='FF000000')
             box_border = XLBorder(left=medium, right=medium, top=medium, bottom=medium)
 
-            # Valor total presupuesto (cabecera y caja de letras)
-            vt_row = _find_row_by_labels(ws_ppto, ['VALOR  TOTAL PRESUPUESTO', 'VALOR TOTAL PRESUPUESTO'])
-            if vt_row:
-                try:
-                    ws_ppto.row_dimensions[vt_row].height = 20
-                except Exception:
-                    pass
-                for c in range(2, 7):
+            if ws_ppto:
+                # Valor total presupuesto (cabecera y caja de letras)
+                vt_row = _find_row_by_labels(ws_ppto, ['VALOR  TOTAL PRESUPUESTO', 'VALOR TOTAL PRESUPUESTO'])
+                if vt_row:
                     try:
-                        # Asegurar que estilizamos la celda ancla
-                        label_cell = _set(ws_ppto, vt_row, c, ws_ppto.cell(row=vt_row, column=c).value)
-                        label_cell.font = bold_font
-                        label_cell.fill = header_fill
-                        label_cell.alignment = XLAlign(horizontal='center', vertical='center')
-                        label_cell.border = box_border
+                        ws_ppto.row_dimensions[vt_row].height = 20
                     except Exception:
                         pass
-                # Fila inferior (letras) con borde caja y wrap
-                letras_row = vt_row + 1
-                try:
-                    ws_ppto.row_dimensions[letras_row].height = 30
-                except Exception:
-                    pass
-                for c in range(2, 7):
+                    for c in range(2, 7):
+                        try:
+                            # Asegurar que estilizamos la celda ancla
+                            label_cell = _set(ws_ppto, vt_row, c, ws_ppto.cell(row=vt_row, column=c).value)
+                            label_cell.font = bold_font
+                            label_cell.fill = header_fill
+                            label_cell.alignment = XLAlign(horizontal='center', vertical='center')
+                            label_cell.border = box_border
+                        except Exception:
+                            pass
+                    # Fila inferior (letras) con borde caja y wrap
+                    letras_row = vt_row + 1
                     try:
-                        cell = _set(ws_ppto, letras_row, c, ws_ppto.cell(row=letras_row, column=c).value)
-                        cell.alignment = XLAlign(horizontal='center', vertical='center', wrap_text=True)
-                        cell.border = box_border
+                        ws_ppto.row_dimensions[letras_row].height = 30
+                    except Exception:
+                        pass
+                    for c in range(2, 7):
+                        try:
+                            cell = _set(ws_ppto, letras_row, c, ws_ppto.cell(row=letras_row, column=c).value)
+                            cell.alignment = XLAlign(horizontal='center', vertical='center', wrap_text=True)
+                            cell.border = box_border
+                        except Exception:
+                            pass
+
+                # Plazo de entrega (caja grande y número a la derecha)
+                plazo_row = _find_row_by_labels(ws_ppto, ['PLAZO DE ENTREGA', 'PLAZO DE ENTREGA: (DIAS'])
+                if plazo_row:
+                    try:
+                        ws_ppto.row_dimensions[plazo_row].height = 22
+                    except Exception:
+                        pass
+                    for c in range(3, 6):
+                        try:
+                            cell = _set(ws_ppto, plazo_row, c, ws_ppto.cell(row=plazo_row, column=c).value)
+                            cell.font = bold_font
+                            cell.alignment = XLAlign(horizontal='center', vertical='center', wrap_text=True)
+                            cell.border = box_border
+                        except Exception:
+                            pass
+                    try:
+                        # No reasignar el valor (para evitar sobrescribir el total si el rango está combinado);
+                        # solo aplicar formato al ancla existente
+                        num_cell = ws_ppto.cell(row=plazo_row, column=6)
+                        if isinstance(num_cell, MergedCell):
+                            num_cell = _anchor(ws_ppto, plazo_row, 6)
+                        num_cell.alignment = XLAlign(horizontal='center', vertical='center')
+                        num_cell.border = box_border
+                        num_cell.number_format = '0'
                     except Exception:
                         pass
 
-            # Plazo de entrega (caja grande y número a la derecha)
-            plazo_row = _find_row_by_labels(ws_ppto, ['PLAZO DE ENTREGA', 'PLAZO DE ENTREGA: (DIAS'])
-            if plazo_row:
-                try:
-                    ws_ppto.row_dimensions[plazo_row].height = 22
-                except Exception:
-                    pass
-                for c in range(3, 6):
+                # Firma del representante legal: línea superior gruesa
+                firma_row = _find_row_by_labels(ws_ppto, ['FIRMA DEL REPRESENTANTE LEGAL'])
+                if firma_row:
                     try:
-                        cell = _set(ws_ppto, plazo_row, c, ws_ppto.cell(row=plazo_row, column=c).value)
-                        cell.font = bold_font
-                        cell.alignment = XLAlign(horizontal='center', vertical='center', wrap_text=True)
-                        cell.border = box_border
+                        ws_ppto.row_dimensions[firma_row].height = 18
                     except Exception:
                         pass
-                try:
-                    # No reasignar el valor (para evitar sobrescribir el total si el rango está combinado);
-                    # solo aplicar formato al ancla existente
-                    num_cell = ws_ppto.cell(row=plazo_row, column=6)
-                    if isinstance(num_cell, MergedCell):
-                        num_cell = _anchor(ws_ppto, plazo_row, 6)
-                    num_cell.alignment = XLAlign(horizontal='center', vertical='center')
-                    num_cell.border = box_border
-                    num_cell.number_format = '0'
-                except Exception:
-                    pass
-
-            # Firma del representante legal: línea superior gruesa
-            firma_row = _find_row_by_labels(ws_ppto, ['FIRMA DEL REPRESENTANTE LEGAL'])
-            if firma_row:
-                try:
-                    ws_ppto.row_dimensions[firma_row].height = 18
-                except Exception:
-                    pass
-                for c in range(2, 7):
-                    try:
-                        cell = _set(ws_ppto, firma_row, c, ws_ppto.cell(row=firma_row, column=c).value)
-                        cell.alignment = XLAlign(horizontal='center', vertical='center')
-                        cell.border = XLBorder(top=medium)
-                    except Exception:
-                        pass
+                    for c in range(2, 7):
+                        try:
+                            cell = _set(ws_ppto, firma_row, c, ws_ppto.cell(row=firma_row, column=c).value)
+                            cell.alignment = XLAlign(horizontal='center', vertical='center')
+                            cell.border = XLBorder(top=medium)
+                        except Exception:
+                            pass
 
             dialog = QDialog(self)
             dialog.setWindowTitle("Insertar Ítem - Análisis Unitarios")

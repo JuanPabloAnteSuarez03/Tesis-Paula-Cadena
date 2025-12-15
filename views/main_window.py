@@ -83,9 +83,9 @@ class MainWindow(QMainWindow):
         # Agregar el splitter al layout principal
         self.main_layout.addWidget(self.main_splitter)
         
-        # Inicialmente ocultar los paneles laterales
-        self.left_panel.setVisible(False)
-        self.right_panel.setVisible(False)
+        # Inicialmente mostrar los paneles laterales abiertos
+        self.left_panel.setVisible(True)
+        self.right_panel.setVisible(True)
         
         # Configurar el panel central (donde va el presupuesto)
         self.setup_center_panel()
@@ -406,6 +406,12 @@ class MainWindow(QMainWindow):
         
         # Crear controlador de recursos
         self.resource_controller = ResourceController()
+        # Si ya existe el controlador de análisis, inyectarlo para refrescos posteriores
+        try:
+            if hasattr(self, "analisis_controller"):
+                self.resource_controller.set_external_analisis_controller(self.analisis_controller)
+        except Exception:
+            pass
         self.resources_container_layout.addWidget(self.resource_controller.view)
     
     def load_analysis(self):
@@ -415,6 +421,12 @@ class MainWindow(QMainWindow):
         
         # Crear controlador de análisis unitarios
         self.analisis_controller = AnalisisUnitariosController()
+        # Inyectar en recursos si ya existe
+        try:
+            if hasattr(self, "resource_controller"):
+                self.resource_controller.set_external_analisis_controller(self.analisis_controller)
+        except Exception:
+            pass
         
         # Conectar la señal de selección con validación del modo actual
         self.analisis_controller.view.analysis_selected.connect(

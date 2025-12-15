@@ -3,6 +3,8 @@ from PyQt6.QtCore import QObject
 from models.recurso import Recurso
 from models.database import SessionLocal
 from models.analisis_unitario_recurso import AnalisisUnitarioRecurso  # Import the missing model
+from models.analisis_unitario import AnalisisUnitario
+from sqlalchemy import func
 from views.resource_list_view import ResourceListView
 from PyQt6.QtWidgets import QMessageBox
 from sqlalchemy.exc import IntegrityError
@@ -18,6 +20,11 @@ class ResourceController(QObject):
         self.view.resource_delete_requested.connect(self.delete_resource)
         # Conectar la señal para agregar recurso
         self.view.resource_added.connect(self.add_resource)
+        # Referencia opcional para refrescar análisis después de actualizaciones
+        self.external_analisis_controller = None
+
+    def set_external_analisis_controller(self, controller):
+        self.external_analisis_controller = controller
 
 
     def load_resources(self):
@@ -41,41 +48,102 @@ class ResourceController(QObject):
     def on_data_changed(self, topLeft, bottomRight, roles):
         """
         Se llama cuando el usuario edita una celda en la tabla.
-        topLeft y bottomRight son índices que indican el rango de celdas modificadas.
-        Usamos el índice de la primera celda modificada para identificar la fila.
+        Solo aplicamos lógica especial al cambiar el valor unitario,
+        advirtiendo que se actualizarán los análisis unitarios relacionados.
         """
-        print("Se ha modificado una celda en la tabla.")
-        # Obtenemos el modelo
         model = self.view.model
-
-        # Por simplicidad, asumimos que solo se edita una celda a la vez
         row = topLeft.row()
-        codigo_item = model.item(row, 0)  # Asumimos que la primera columna es el código único
+        codigo_item = model.item(row, 0)
         if not codigo_item:
             return
 
         codigo = codigo_item.text()
+        col = topLeft.column()
 
-        # Leer los valores actuales de la fila
-        descripcion = model.item(row, 1).text()
-        unidad = model.item(row, 2).text()
-        valor_unitario = float(model.item(row, 3).text())
+        def _parse_float(text: str) -> float:
+            try:
+                return float(str(text).replace("$", "").replace(",", "").strip())
+            except Exception:
+                return 0.0
 
-        # Actualizar el recurso en la base de datos
         session = SessionLocal()
         try:
             recurso = session.query(Recurso).filter(Recurso.codigo == codigo).first()
-            if recurso:
+            if not recurso:
+                return
+
+            # Actualizar descripción y unidad sin advertencia
+            if col in (1, 2):
+                descripcion = model.item(row, 1).text()
+                unidad = model.item(row, 2).text()
                 recurso.descripcion = descripcion
                 recurso.unidad = unidad
-                recurso.valor_unitario = valor_unitario
                 session.commit()
-                print(f"Recurso {codigo} actualizado correctamente en la BD.")
-            else:
-                print(f"No se encontró recurso con código {codigo}.")
+                return
+
+            # Manejo especial para valor unitario (columna 3)
+            if col == 3:
+                nuevo_valor = _parse_float(model.item(row, 3).text())
+                valor_anterior = recurso.valor_unitario or 0.0
+                if abs(nuevo_valor - valor_anterior) < 1e-9:
+                    return
+
+                reply = QMessageBox.question(
+                    self.view,
+                    "Actualizar valor unitario",
+                    (
+                        "Vas a modificar el valor unitario del recurso.\n"
+                        "Esto actualizará todos los análisis unitarios que lo contienen.\n\n"
+                        "¿Deseas continuar?"
+                    ),
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    # Revertir visualmente al valor anterior
+                    model.item(row, 3).setText(f"${valor_anterior:,.2f}")
+                    return
+
+                # 1) Actualizar recurso
+                recurso.valor_unitario = nuevo_valor
+
+                # 2) Actualizar relaciones y totales de análisis afectados
+                relaciones = session.query(AnalisisUnitarioRecurso).filter(
+                    AnalisisUnitarioRecurso.codigo_recurso == codigo
+                ).all()
+                codigos_afectados = set()
+                for rel in relaciones:
+                    rel.vr_unitario = nuevo_valor
+                    rel.vr_parcial = (rel.cantidad_recurso or 0.0) * (1 + (rel.desper or 0.0)) * nuevo_valor
+                    codigos_afectados.add(rel.codigo_analisis)
+
+                if codigos_afectados:
+                    for a_code in codigos_afectados:
+                        total = (
+                            session.query(func.coalesce(func.sum(AnalisisUnitarioRecurso.vr_parcial), 0.0))
+                            .filter(AnalisisUnitarioRecurso.codigo_analisis == a_code)
+                            .scalar()
+                        )
+                        ana = session.query(AnalisisUnitario).filter(AnalisisUnitario.codigo == a_code).first()
+                        if ana:
+                            ana.total = total or 0.0
+
+                session.commit()
+                QMessageBox.information(
+                    self.view,
+                    "Actualización completada",
+                    "Se actualizó el recurso y los análisis unitarios relacionados.",
+                )
+
+                # Refrescar vistas: recursos y análisis
+                self.load_resources()
+                try:
+                    if self.external_analisis_controller:
+                        self.external_analisis_controller.load_analisis_unitarios()
+                except Exception:
+                    pass
         except Exception as e:
             session.rollback()
-            print(f"Error al actualizar recurso {codigo}: {e}")
+            QMessageBox.critical(self.view, "Error", f"No se pudo actualizar el recurso {codigo}: {e}")
         finally:
             session.close()
 
@@ -96,9 +164,8 @@ class ResourceController(QObject):
 
             # Verificar si el código ya existe (poco probable pero es una buena práctica)
             if session.query(Recurso).filter(Recurso.codigo == new_code).first():
-                 QMessageBox.warning(self.view, "Error", f"El código autogenerado '{new_code}' ya existe. Inténtelo de nuevo.")
-                 session.close()
-                 return
+                QMessageBox.warning(self.view, "Error", f"El código autogenerado '{new_code}' ya existe. Inténtelo de nuevo.")
+                return
 
             resource_data['codigo'] = new_code
             new_resource = Recurso(**resource_data)

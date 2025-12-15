@@ -127,10 +127,18 @@ class AnalisisUnitariosView(QWidget):
         self.table.setHorizontalHeaderLabels(["Código", "Descripción", "Unidad", "Total"])
         
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # Código
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)          # Descripción
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Unidad
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Total
+        # Configuración original (código/unidad/total auto) y descripción arrastrable
+        header.setStretchLastSection(False)
+        header.setMinimumSectionSize(60)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)   # Código
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)        # Descripción (drag)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)   # Unidad
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)   # Total
+        # Anchos iniciales más amplios para que se lean las 4 columnas; siguen siendo redimensionables
+        self.table.setColumnWidth(0, 100)   # Código
+        self.table.setColumnWidth(1, 120)   # Descripción
+        self.table.setColumnWidth(2, 90)    # Unidad
+        self.table.setColumnWidth(3, 140)   # Total
 
         # Habilitar el ordenamiento al hacer clic en los encabezados
         self.table.setSortingEnabled(True)
