@@ -62,7 +62,7 @@ class PresupuestoAnalisisUnitarioController(QObject):
         """Abre un diálogo modal con la vista del selector de analisis."""
         analisis_unitarios_controller = AnalisisUnitariosController()
         dialog = QDialog(self.view)
-        dialog.setWindowTitle("Seleccionar Recurso")
+        dialog.setWindowTitle("Adicionar Recurso")
         dialog.resize(600, 400)
         layout = QVBoxLayout(dialog)
         layout.addWidget(analisis_unitarios_controller.view)

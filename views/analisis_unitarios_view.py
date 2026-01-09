@@ -156,7 +156,13 @@ class AnalisisUnitariosView(QWidget):
         self.layout.addWidget(self.table)
 
     def load_data(self, data):
+        # Cargar de forma más liviana: pausar renders y sorting mientras se llena
+        sorting = self.table.isSortingEnabled()
+        updates = self.table.updatesEnabled()
+        self.table.setUpdatesEnabled(False)
+        self.table.setSortingEnabled(False)
         self.table.blockSignals(True)
+
         self.table.setRowCount(len(data))
         for row, item in enumerate(data):
             self.table.setItem(row, 0, QTableWidgetItem(item.get("codigo", "")))
@@ -170,7 +176,10 @@ class AnalisisUnitariosView(QWidget):
             
             total_value = item.get('total', 0)
             self.table.setItem(row, 3, QTableWidgetItem(f"${total_value:,.2f}"))
+
         self.table.blockSignals(False)
+        self.table.setSortingEnabled(sorting)
+        self.table.setUpdatesEnabled(updates)
 
     def on_add_clicked(self):
         data = self.get_data_from_form()

@@ -15,15 +15,17 @@ class RecursosPorAnalisisController(QObject):
     # Nueva señal: emite (codigo_analisis, nuevo_total) cuando cambia el total por ediciones en la tabla
     analysis_total_changed = pyqtSignal(str, float)
     
-    def __init__(self, codigo_analisis, parent=None, embed_readonly: bool = False):
+    def __init__(self, codigo_analisis, parent=None, embed_readonly: bool = False, refresh_resources_cb=None):
         super().__init__(parent)
         self.codigo_analisis = codigo_analisis
         self.embed_readonly = bool(embed_readonly)
+        self.refresh_resources_cb = refresh_resources_cb
         print(f"[DEBUG] Iniciando RecursosPorAnalisisController para análisis: {codigo_analisis}")
         # Si está embebido en la vista de Análisis del Presupuesto, ocultamos el formulario
         # y mostramos todas las filas completas (sin scroll interno)
         # En modo embed_readonly ocultamos formulario y botones inferiores
-        self.view = RecursosPorAnalisisView(codigo_analisis, show_form=not embed_readonly, show_buttons=not embed_readonly)
+        # Ocultamos el formulario manual y el botón "Agregar a Tabla" (redundante)
+        self.view = RecursosPorAnalisisView(codigo_analisis, show_form=False, show_buttons=not embed_readonly)
         # Temporizador para auto-guardar con debounce
         self._commit_timer = QTimer()
         self._commit_timer.setSingleShot(True)
@@ -36,9 +38,7 @@ class RecursosPorAnalisisController(QObject):
             self.view.add_button.clicked.connect(self.open_resource_selector)
         if hasattr(self.view, 'update_button') and self.view.update_button is not None:
             self.view.update_button.clicked.connect(self.update_analysis)
-        # Conectar el botón del formulario manual para agregar fila (si existe)
-        if hasattr(self.view, 'add_form_button') and self.view.add_form_button is not None:
-            self.view.add_form_button.clicked.connect(self.on_add_form_button_clicked)
+        # Formulario manual removido; no conexión a add_form_button
         # Conectar la señal dataChanged del modelo para detectar ediciones
         self.view.model.dataChanged.connect(self.on_item_changed)
         print("✅ Señal dataChanged conectada correctamente.")
@@ -78,12 +78,24 @@ class RecursosPorAnalisisController(QObject):
         from controllers.resource_controller import ResourceController
         resource_controller = ResourceController()
         dialog = QDialog(self.view)
-        dialog.setWindowTitle("Seleccionar Recurso")
+        dialog.setWindowTitle("Adicionar Recurso")
         dialog.resize(600, 400)
         layout = QVBoxLayout(dialog)
         layout.addWidget(resource_controller.view)
         dialog.setLayout(layout)
+        def _on_close_refresh():
+            try:
+                resource_controller.load_resources()
+            except Exception:
+                pass
+            # Refrescar la vista principal de recursos si se proporcionó callback externo
+            if callable(self.refresh_resources_cb):
+                try:
+                    self.refresh_resources_cb()
+                except Exception:
+                    pass
         resource_controller.view.resource_selected.connect(lambda resource: self.on_resource_selected(resource, dialog))
+        dialog.finished.connect(lambda _: _on_close_refresh())
         dialog.exec()
 
     def on_resource_selected(self, resource_code, dialog):
@@ -124,6 +136,17 @@ class RecursosPorAnalisisController(QObject):
         self.view.model.setItem(row_position, 6, QStandardItem("$0.00"))
         
         dialog.accept()
+        # Limpiar inputs del formulario para facilitar la siguiente inserción
+        try:
+            self.view.clear_form_inputs()
+        except Exception:
+            pass
+        # Si hay callback externo, refrescar la lista principal de recursos
+        if callable(self.refresh_resources_cb):
+            try:
+                self.refresh_resources_cb()
+            except Exception:
+                pass
 
     def on_add_form_button_clicked(self):
         """Se ejecuta al presionar el botón 'Agregar a Tabla' del formulario."""
@@ -200,6 +223,12 @@ class RecursosPorAnalisisController(QObject):
             )
             # Emitir la señal de que el análisis ha sido actualizado
             self.analysis_updated.emit()
+            # Cerrar la ventana después de actualizar
+            try:
+                parent = self.view.parentWidget() or self.view
+                parent.close()
+            except Exception:
+                pass
         except Exception as e:
             session.rollback()
             QMessageBox.critical(self.view, "Error", f"Error al actualizar análisis: {e}")
@@ -249,12 +278,6 @@ class RecursosPorAnalisisController(QObject):
                 except Exception:
                     pass
             self.analysis_total_changed.emit(self.codigo_analisis, total_est)
-            # Programar commit a BD después de 500ms sin más cambios (solo si no es embed)
-            if not getattr(self, 'embed_readonly', False):
-                try:
-                    self._commit_timer.start(500)
-                except Exception:
-                    pass
         finally:
             self.view.model.blockSignals(False)
 

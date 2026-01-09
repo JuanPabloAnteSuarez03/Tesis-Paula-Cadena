@@ -174,6 +174,10 @@ class ResourceController(QObject):
             session.commit()
             QMessageBox.information(self.view, "Éxito", f"Recurso agregado con el código '{new_code}'.")
             self.load_resources()
+            try:
+                self.view.clear_form_inputs()
+            except Exception:
+                pass
         except IntegrityError:
             session.rollback()
             QMessageBox.warning(

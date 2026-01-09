@@ -249,6 +249,15 @@ class ResourceListView(QWidget):
             "valor_unitario": valor_unitario
         })
 
+    # Utilidad para limpiar los inputs del formulario tras agregar
+    def clear_form_inputs(self):
+        try:
+            self.descripcion_input.clear()
+            self.unidad_input.clear()
+            self.valor_input.clear()
+        except Exception:
+            pass
+
 if __name__ == "__main__":
     import sys
     from PyQt6.QtWidgets import QApplication

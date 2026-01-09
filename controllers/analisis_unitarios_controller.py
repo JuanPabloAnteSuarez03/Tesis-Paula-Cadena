@@ -1,6 +1,6 @@
 # controllers/analisis_unitarios_controller.py
 from PyQt6.QtCore import QObject
-from PyQt6.QtWidgets import QMessageBox, QDialog, QVBoxLayout
+from PyQt6.QtWidgets import QMessageBox, QDialog, QVBoxLayout, QTableWidgetItem
 from models.analisis_unitario import AnalisisUnitario
 from models.database import SessionLocal
 from views.analisis_unitarios_view import AnalisisUnitariosView
@@ -12,6 +12,9 @@ class AnalisisUnitariosController(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.view = AnalisisUnitariosView()
+        # Mantener referencias a editores abiertos para evitar que se destruyan al salir del scope
+        self._open_editors = []
+        self._resource_controller = None
         self.load_analisis_unitarios()
 
         # Conectar edición de celdas
@@ -30,15 +33,32 @@ class AnalisisUnitariosController(QObject):
         session = SessionLocal()
         try:
             analisis_list = session.query(AnalisisUnitario).all()
-            data = []
-            for a in analisis_list:
-                data.append({
-                    "codigo": a.codigo,
-                    "descripcion": a.descripcion,
-                    "unidad": a.unidad,
-                    "total": a.total_calculado
-                })
-            self.view.load_data(data)
+            table = self.view.table
+
+            # Ruta rápida: rellenar tabla directamente con renders y sort pausados
+            updates = table.updatesEnabled()
+            sorting = table.isSortingEnabled()
+            table.setUpdatesEnabled(False)
+            table.setSortingEnabled(False)
+            table.blockSignals(True)
+
+            table.setRowCount(len(analisis_list))
+            for row, a in enumerate(analisis_list):
+                table.setItem(row, 0, QTableWidgetItem(a.codigo or ""))
+
+                desc = a.descripcion or ""
+                desc_item = QTableWidgetItem(desc)
+                desc_item.setToolTip(desc)
+                table.setItem(row, 1, desc_item)
+
+                table.setItem(row, 2, QTableWidgetItem(a.unidad or ""))
+
+                total_val = a.total_calculado or 0.0
+                table.setItem(row, 3, QTableWidgetItem(f"${total_val:,.2f}"))
+
+            table.blockSignals(False)
+            table.setSortingEnabled(sorting)
+            table.setUpdatesEnabled(updates)
         except Exception as e:
             print("Error al cargar análisis unitarios:", e)
         finally:
@@ -84,6 +104,23 @@ class AnalisisUnitariosController(QObject):
             session.add(nuevo_analisis)
             session.commit()
             QMessageBox.information(self.view, "Éxito", f"Análisis unitario agregado con código '{new_code}'.")
+            # Abrir inmediatamente el editor de recursos para completar costos
+            try:
+                editor = RecursosPorAnalisisController(
+                    new_code,
+                    refresh_resources_cb=self._refresh_resources
+                )
+                editor.analysis_updated.connect(self.load_analisis_unitarios)
+                editor.view.show()
+                try:
+                    editor.view.raise_()
+                    editor.view.activateWindow()
+                except Exception:
+                    pass
+                # Guardar referencia para que no sea recolectado
+                self._open_editors.append(editor)
+            except Exception as e:
+                QMessageBox.warning(self.view, "Aviso", f"Análisis creado, pero no se pudo abrir el editor: {e}")
             self.load_analisis_unitarios()
         except Exception as e:
             session.rollback()
@@ -134,6 +171,8 @@ class AnalisisUnitariosController(QObject):
                 analisis.total_calculado = total
                 session.commit()
                 print(f"Análisis unitario {codigo} actualizado correctamente.")
+                # Actualizar solo la fila afectada en la tabla (evita recargar todo)
+                self._update_table_row(codigo, descripcion, unidad, total)
             else:
                 print(f"No se encontró análisis unitario con código {codigo}.")
         except Exception as e:
@@ -142,7 +181,38 @@ class AnalisisUnitariosController(QObject):
         finally:
             session.close()
 
-        self.load_analisis_unitarios()
+    def _update_table_row(self, codigo: str, descripcion: str, unidad: str, total: float):
+        """
+        Actualiza la fila existente para un código dado sin recargar toda la tabla.
+        """
+        try:
+            table = self.view.table
+            for r in range(table.rowCount()):
+                code_item = table.item(r, 0)
+                if code_item and code_item.text() == codigo:
+                    # Descripción
+                    desc_item = table.item(r, 1)
+                    if not desc_item:
+                        desc_item = QTableWidgetItem()
+                        table.setItem(r, 1, desc_item)
+                    desc_item.setText(descripcion or "")
+                    desc_item.setToolTip(descripcion or "")
+                    # Unidad
+                    unit_item = table.item(r, 2)
+                    if not unit_item:
+                        unit_item = QTableWidgetItem()
+                        table.setItem(r, 2, unit_item)
+                    unit_item.setText(unidad or "")
+                    # Total
+                    total_item = table.item(r, 3)
+                    if not total_item:
+                        total_item = QTableWidgetItem()
+                        table.setItem(r, 3, total_item)
+                    total_item.setText(f"${total:,.2f}")
+                    break
+        except Exception:
+            # En caso de cualquier problema, caemos al refresco completo
+            self.load_analisis_unitarios()
 
     def on_analysis_selected(self, codigo_analisis):
         """
@@ -155,7 +225,27 @@ class AnalisisUnitariosController(QObject):
         Abre la ventana para editar los recursos de un análisis unitario.
         """
         print(f"Abriendo editor de recursos para: {codigo_analisis}")
-        self.recursos_controller = RecursosPorAnalisisController(codigo_analisis)
-        # Conectar la señal de actualización para refrescar la lista principal
-        self.recursos_controller.analysis_updated.connect(self.load_analisis_unitarios)
-        self.recursos_controller.view.show()
+        editor = RecursosPorAnalisisController(
+            codigo_analisis,
+            refresh_resources_cb=self._refresh_resources
+        )
+        editor.analysis_updated.connect(self.load_analisis_unitarios)
+        editor.view.show()
+        try:
+            editor.view.raise_()
+            editor.view.activateWindow()
+        except Exception:
+            pass
+        # Guardar referencia para evitar que el GC cierre la ventana
+        self._open_editors.append(editor)
+
+    def set_resource_controller(self, resource_controller):
+        """Permite refrescar la vista principal de recursos cuando se agregan desde el editor."""
+        self._resource_controller = resource_controller
+
+    def _refresh_resources(self):
+        if self._resource_controller:
+            try:
+                self._resource_controller.load_resources()
+            except Exception:
+                pass

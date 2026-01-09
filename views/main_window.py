@@ -228,7 +228,31 @@ class MainWindow(QMainWindow):
         self.mode_select.addItems(["Presupuesto", "AIU", "Análisis Unitario", "Cronograma"])
         self.mode_select.setCurrentIndex(0)
         self.mode_select.currentIndexChanged.connect(self.on_mode_changed)
-        self.mode_select.setStyleSheet("QComboBox { background: white; color: #333; padding: 4px 8px; border-radius: 4px; }")
+        # Estilo tipo botón azul con flecha blanca
+        self.mode_select.setStyleSheet(
+            """
+            QComboBox {
+                background-color: #007ACC;
+                color: white;
+                padding: 6px 28px 6px 10px;
+                border-radius: 4px;
+                border: 0.55px solid #005A9E;
+                font-weight: 600;
+            }
+            QComboBox:hover { background-color: #005A9E; }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 22px;
+                border: none;
+            }
+            QComboBox::down-arrow {
+                image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24'><path fill='%23ffffff' d='M7 10l5 5 5-5z'/></svg>");
+                width: 12px;
+                height: 12px;
+            }
+            """
+        )
         
         # Botón para mostrar/ocultar panel derecho (análisis)
         self.toggle_right_btn = QPushButton("Análisis ≡")
@@ -410,6 +434,8 @@ class MainWindow(QMainWindow):
         try:
             if hasattr(self, "analisis_controller"):
                 self.resource_controller.set_external_analisis_controller(self.analisis_controller)
+                if hasattr(self.analisis_controller, "set_resource_controller"):
+                    self.analisis_controller.set_resource_controller(self.resource_controller)
         except Exception:
             pass
         self.resources_container_layout.addWidget(self.resource_controller.view)
@@ -425,6 +451,8 @@ class MainWindow(QMainWindow):
         try:
             if hasattr(self, "resource_controller"):
                 self.resource_controller.set_external_analisis_controller(self.analisis_controller)
+                if hasattr(self.analisis_controller, "set_resource_controller"):
+                    self.analisis_controller.set_resource_controller(self.resource_controller)
         except Exception:
             pass
         
