@@ -1,6 +1,7 @@
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFileDialog,
-    QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, QTabWidget
+    QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, QTabWidget,
+    QApplication, QWidget, QProgressBar
 )
 from PyQt6.QtCore import Qt
 
@@ -26,6 +27,19 @@ class IFCMaterialsDialog(QDialog):
         )
         info.setWordWrap(True)
         layout.addWidget(info)
+
+        # Barra de progreso inline (oculta por defecto)
+        self.progress_widget = QWidget(self)
+        prog_layout = QHBoxLayout(self.progress_widget)
+        prog_layout.setContentsMargins(0, 0, 0, 0)
+        prog_layout.setSpacing(8)
+        self.progress_label = QLabel("Procesando IFC...")
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)  # indeterminado
+        prog_layout.addWidget(self.progress_label)
+        prog_layout.addWidget(self.progress_bar, 1)
+        self.progress_widget.setVisible(False)
+        layout.addWidget(self.progress_widget)
 
         # Pestañas
         self.tabs = QTabWidget(self)
@@ -65,16 +79,16 @@ class IFCMaterialsDialog(QDialog):
 
         # Botones
         btns = QHBoxLayout()
-        btn_open = QPushButton("Abrir IFC…")
-        btn_generate = QPushButton("Generar ítems…")
-        btn_close = QPushButton("Cerrar")
-        btn_open.clicked.connect(self._open_ifc)
-        btn_generate.clicked.connect(self._generate_items_from_ifc)
-        btn_close.clicked.connect(self.accept)
-        btns.addWidget(btn_open)
+        self.btn_open = QPushButton("Abrir IFC…")
+        self.btn_generate = QPushButton("Generar ítems…")
+        self.btn_close = QPushButton("Cerrar")
+        self.btn_open.clicked.connect(self._open_ifc)
+        self.btn_generate.clicked.connect(self._generate_items_from_ifc)
+        self.btn_close.clicked.connect(self.accept)
+        btns.addWidget(self.btn_open)
         btns.addStretch(1)
-        btns.addWidget(btn_generate)
-        btns.addWidget(btn_close)
+        btns.addWidget(self.btn_generate)
+        btns.addWidget(self.btn_close)
         layout.addLayout(btns)
 
         if not ifcopenshell:
@@ -87,13 +101,18 @@ class IFCMaterialsDialog(QDialog):
         path, _ = QFileDialog.getOpenFileName(self, "Abrir IFC", "", "IFC Files (*.ifc *.ifczip *.ifcZIP)")
         if not path:
             return
+        self._show_progress("Cargando IFC...")
         try:
             model = ifcopenshell.open(path)
         except Exception as e:
+            self._hide_progress()
             QMessageBox.critical(self, "Error", f"No se pudo abrir el IFC:\n{e}")
             return
 
-        self._populate_from_model(model)
+        try:
+            self._populate_from_model(model)
+        finally:
+            self._hide_progress()
 
     def _generate_items_from_ifc(self):
         """
@@ -243,17 +262,45 @@ class IFCMaterialsDialog(QDialog):
                         return [{"name": (c.Material.Name if c.Material else None), "thickness": None} for c in consts]
             return []
 
+        self._update_progress("Procesando concreto...")
         # Poblar tabla de concreto
         try:
             self._populate_concrete_from_model(ifc, length_scale, area_scale, volume_scale, mass_scale)
         except Exception:
             pass
 
+        self._update_progress("Procesando acero de refuerzo...")
         # Poblar tabla de acero de refuerzo
         try:
             self._populate_rebar_from_model(ifc)
         except Exception:
             # Evitar que un fallo en acero rompa la extracción de materiales
+            pass
+
+    def _show_progress(self, text: str):
+        try:
+            self.progress_label.setText(text)
+            self.progress_widget.setVisible(True)
+            self.btn_open.setEnabled(False)
+            self.btn_generate.setEnabled(False)
+            QApplication.processEvents()
+        except Exception:
+            pass
+
+    def _update_progress(self, text: str):
+        try:
+            self.progress_label.setText(text)
+            QApplication.processEvents()
+        except Exception:
+            pass
+
+    def _hide_progress(self):
+        try:
+            self.progress_widget.setVisible(False)
+            self.btn_open.setEnabled(True)
+            self.btn_generate.setEnabled(True)
+            QApplication.processEvents()
+        except Exception:
             pass
 
     def _export_csv(self):

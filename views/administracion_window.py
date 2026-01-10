@@ -41,6 +41,8 @@ class AdministracionWindow(QDialog):
         self.table.setHorizontalHeaderLabels([
             "Profesional", "Cargo", "Salario Mensual", "% Dedicación", "Meses", "Total"
         ])
+        # Altura flexible: sin mínimo fijo para no romper en pantalla completa
+        self.table.setMinimumHeight(0)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -54,15 +56,16 @@ class AdministracionWindow(QDialog):
         prof_v.setContentsMargins(0,0,0,0)
         prof_v.addWidget(self.table)
 
-        # Subgastos administrativos en múltiples subtablas
-        from PyQt6.QtWidgets import QGroupBox, QGridLayout, QLabel, QSpacerItem, QSizePolicy, QSplitter
+        # Subgastos administrativos en múltiples subtablas (apilados en vertical)
+        from PyQt6.QtWidgets import QGroupBox, QLabel, QSpacerItem, QSizePolicy, QSplitter
         sub_box = QGroupBox("Gastos Administrativos (Subgastos)")
-        sub_layout = QGridLayout(sub_box)
+        sub_layout = QVBoxLayout(sub_box)
 
         # Oficina / Papelería / Otros
         self.tbl_oficina = QTableWidget()
         self.tbl_oficina.setColumnCount(5)
         self.tbl_oficina.setHorizontalHeaderLabels(["Concepto", "Valor Base", "% Dedic.", "Meses", "Valor"]) 
+        self.tbl_oficina.setMinimumHeight(0)
         oh = self.tbl_oficina.horizontalHeader()
         oh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         oh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -78,9 +81,7 @@ class AdministracionWindow(QDialog):
         self.btn_add_oficina.setFixedWidth(90)
         hl_of.addStretch(1)
         hl_of.addWidget(self.btn_add_oficina)
-        sub_layout.addWidget(header_of, 0, 0)
-        # Splitter horizontal para ajustar Oficina vs Pólizas
-        split_hp = QSplitter(Qt.Orientation.Horizontal)
+        sub_layout.addWidget(header_of)
         self.tbl_oficina.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         # Contenedor vertical para tabla y botones de Oficina
         of_container = QWidget()
@@ -94,16 +95,16 @@ class AdministracionWindow(QDialog):
         of_btns.addWidget(self.btn_add_oficina_b)
         of_btns.addWidget(self.btn_del_oficina_b)
         of_v.addLayout(of_btns)
-        split_hp.addWidget(of_container)
-        # Pólizas se añade más abajo, tras crearla
+        sub_layout.addWidget(of_container)
         self.lbl_subtotal_oficina = QLabel("Subtotal: $0.00")
-        self.lbl_subtotal_oficina.setStyleSheet("font-weight: bold; padding: 16px 0 40px 0;")
-        sub_layout.addWidget(self.lbl_subtotal_oficina, 2, 0)
+        self.lbl_subtotal_oficina.setStyleSheet("font-weight: bold; padding: 4px 0 8px 0;")
+        sub_layout.addWidget(self.lbl_subtotal_oficina)
 
         # Pólizas (porcentaje sobre base de contrato por defecto)
         self.tbl_polizas = QTableWidget()
         self.tbl_polizas.setColumnCount(7)
         self.tbl_polizas.setHorizontalHeaderLabels(["Concepto", "% Req.", "Meses", "% Prima", "Valor Base", "% Dedic.", "Valor"])
+        self.tbl_polizas.setMinimumHeight(0)
         ph = self.tbl_polizas.horizontalHeader()
         ph.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         ph.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -122,7 +123,7 @@ class AdministracionWindow(QDialog):
         self.btn_add_poliza.setFixedWidth(90)
         hl_pol.addStretch(1)
         hl_pol.addWidget(self.btn_add_poliza)
-        sub_layout.addWidget(header_pol, 0, 1)
+        sub_layout.addWidget(header_pol)
         self.tbl_polizas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         # Contenedor vertical para tabla y botones de Polizas
         pol_container = QWidget()
@@ -136,18 +137,16 @@ class AdministracionWindow(QDialog):
         pol_btns.addWidget(self.btn_add_poliza_b)
         pol_btns.addWidget(self.btn_del_poliza_b)
         pol_v.addLayout(pol_btns)
-        split_hp.addWidget(pol_container)
-        split_hp.setStretchFactor(0, 1)
-        split_hp.setStretchFactor(1, 1)
-        sub_layout.addWidget(split_hp, 1, 0, 1, 2)
+        sub_layout.addWidget(pol_container)
         self.lbl_subtotal_polizas = QLabel("Subtotal: $0.00")
-        self.lbl_subtotal_polizas.setStyleSheet("font-weight: bold; padding: 4px 0 10px 0;")
-        sub_layout.addWidget(self.lbl_subtotal_polizas, 2, 1)
+        self.lbl_subtotal_polizas.setStyleSheet("font-weight: bold; padding: 4px 0 8px 0;")
+        sub_layout.addWidget(self.lbl_subtotal_polizas)
 
         # Estampillas (porcentaje sobre base de contrato)
         self.tbl_estamp = QTableWidget()
         self.tbl_estamp.setColumnCount(3)
         self.tbl_estamp.setHorizontalHeaderLabels(["Concepto", "% Tasa", "Valor"])
+        self.tbl_estamp.setMinimumHeight(0)
         eh = self.tbl_estamp.horizontalHeader()
         eh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         eh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -162,7 +161,7 @@ class AdministracionWindow(QDialog):
         self.btn_add_estamp.setFixedWidth(90)
         hl_est.addStretch(1)
         hl_est.addWidget(self.btn_add_estamp)
-        sub_layout.addWidget(header_est, 2, 0, 1, 2)
+        sub_layout.addWidget(header_est)
         # Contenedor vertical para Estampillas y sus botones
         est_container = QWidget()
         est_v = QVBoxLayout(est_container)
@@ -175,18 +174,15 @@ class AdministracionWindow(QDialog):
         est_btns.addWidget(self.btn_add_estamp_b)
         est_btns.addWidget(self.btn_del_estamp_b)
         est_v.addLayout(est_btns)
-        sub_layout.addWidget(est_container, 3, 0, 1, 2)
+        sub_layout.addWidget(est_container)
         self.lbl_subtotal_estamp = QLabel("Subtotal: $0.00")
-        self.lbl_subtotal_estamp.setStyleSheet("font-weight: bold; padding: 4px 0 10px 0;")
-        sub_layout.addWidget(self.lbl_subtotal_estamp, 4, 0, 1, 2)
+        self.lbl_subtotal_estamp.setStyleSheet("font-weight: bold; padding: 4px 0 8px 0;")
+        sub_layout.addWidget(self.lbl_subtotal_estamp)
         # Espaciador inferior para evitar solapamiento con el siguiente bloque
         sub_layout.setContentsMargins(8, 8, 8, 24)
-        sub_layout.addItem(QSpacerItem(20, 28, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed), 5, 0, 1, 2)
-        # Hacer que las filas con tablas se estiren mejor
-        sub_layout.setRowStretch(1, 1)
-        sub_layout.setRowStretch(3, 1)
-        sub_layout.setColumnStretch(0, 1)
-        sub_layout.setColumnStretch(1, 1)
+        sub_layout.addItem(QSpacerItem(20, 16, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed))
+        # Hacer que los bloques crezcan en vertical si hay espacio
+        sub_layout.addStretch(1)
 
         # Splitter vertical para ajustar profesionales vs subgastos (dar más espacio a subgastos)
         split_v = QSplitter(Qt.Orientation.Vertical)

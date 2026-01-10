@@ -59,7 +59,7 @@ class AnalisisMatchDialog(QDialog):
         actions.addStretch(1)
         self.btn_accept = QPushButton("Usar seleccionado")
         self.btn_stop = QPushButton("Detener proceso")
-        self.btn_cancel = QPushButton("Cancelar")
+        self.btn_cancel = QPushButton("Siguiente análisis")
         actions.addWidget(self.btn_accept)
         actions.addWidget(self.btn_stop)
         actions.addWidget(self.btn_cancel)
