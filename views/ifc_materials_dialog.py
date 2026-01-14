@@ -110,7 +110,7 @@ class IFCMaterialsDialog(QDialog):
             return
 
         try:
-            self._populate_from_model(model)
+        self._populate_from_model(model)
         finally:
             self._hide_progress()
 

@@ -1,7 +1,8 @@
 # views/analisis_unitarios_view.py
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QHeaderView, QPushButton, QLineEdit, QLabel, QMessageBox, QApplication
+    QHeaderView, QPushButton, QLineEdit, QLabel, QMessageBox, QApplication,
+    QSizePolicy
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 
@@ -55,6 +56,9 @@ class AnalisisUnitariosView(QWidget):
                 border-radius: 4px;
             }
         """)
+        # Control: si el usuario ya redimensionó manualmente la descripción, no auto-ajustar más
+        self._desc_user_resized = False
+        self._setting_desc_width = False
 
     def create_form(self):
         # Formulario para agregar un nuevo análisis unitario
@@ -127,23 +131,37 @@ class AnalisisUnitariosView(QWidget):
         self.table.setHorizontalHeaderLabels(["Código", "Descripción", "Unidad", "Total"])
         
         header = self.table.horizontalHeader()
-        # Configuración original (código/unidad/total auto) y descripción arrastrable
+        # Mantener tamaños base; permitir arrastrar Descripción; el auto-ajuste lo hacemos nosotros
         header.setStretchLastSection(False)
         header.setMinimumSectionSize(60)
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)   # Código
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)        # Descripción (drag)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)   # Código
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)        # Descripción (arrastrable)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)   # Unidad
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)   # Total
-        # Anchos iniciales más amplios para que se lean las 4 columnas; siguen siendo redimensionables
-        self.table.setColumnWidth(0, 100)   # Código
-        self.table.setColumnWidth(1, 120)   # Descripción
+        # Anchos base para primeras columnas
+        self.table.setColumnWidth(0, 110)   # Código
+        # Evitar que este set inicial se interprete como resize manual
+        self._setting_desc_width = True
+        try:
+            self.table.setColumnWidth(1, 300)   # Descripción (ancho inicial, usuario ajusta)
+        finally:
+            self._setting_desc_width = False
         self.table.setColumnWidth(2, 90)    # Unidad
         self.table.setColumnWidth(3, 140)   # Total
+        # Si el usuario arrastra la descripción, dejamos de auto-ajustarla
+        try:
+            header.sectionResized.connect(self._on_header_section_resized)
+        except Exception:
+            pass
+        # Que la tabla crezca y llene el espacio disponible en el contenedor
+        self.table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.table.verticalHeader().setDefaultSectionSize(28)
 
         # Habilitar el ordenamiento al hacer clic en los encabezados
         self.table.setSortingEnabled(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        # Permitir edición (p.ej., descripción) y bloquear columnas puntuales vía flags
+        self.table.setEditTriggers(QTableWidget.EditTrigger.AllEditTriggers)
         self.table.setAlternatingRowColors(True)
         
         # Conectar el doble clic para emitir la señal de selección
@@ -153,7 +171,61 @@ class AnalisisUnitariosView(QWidget):
         self.table.cellClicked.connect(self.on_cell_clicked)
         
         # Añadir la tabla al layout principal
-        self.layout.addWidget(self.table)
+        self.layout.addWidget(self.table, 1)
+
+        # Ajuste inicial para que la descripción ocupe el espacio sobrante (cuando ya haya layout)
+        try:
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, self._auto_size_description)
+        except Exception:
+            pass
+
+    def _on_header_section_resized(self, logical_index: int, _old: int, _new: int):
+        # Si el resize viene de nuestro auto-ajuste, no marcar como "user resized"
+        if getattr(self, "_setting_desc_width", False):
+            return
+        if logical_index == 1:
+            self._desc_user_resized = True
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._auto_size_description()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Asegurar auto-ajuste cuando la ventana ya está visible (viewport width válido)
+        try:
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, self._auto_size_description)
+        except Exception:
+            pass
+
+    def _auto_size_description(self):
+        """
+        Hace que la tabla cubra todo el ancho usando la columna Descripción como "relleno",
+        sin tocarla si el usuario ya la ajustó manualmente.
+        """
+        try:
+            if getattr(self, "_desc_user_resized", False):
+                return
+            if not hasattr(self, "table"):
+                return
+            table = self.table
+            # Ancho disponible en viewport (sin headers)
+            viewport_w = table.viewport().width()
+            if viewport_w <= 0:
+                return
+            # Sumar anchos de columnas excepto descripción
+            other = table.columnWidth(0) + table.columnWidth(2) + table.columnWidth(3)
+            # Dejar un margen mínimo para evitar scroll horizontal por 1-2 px
+            target = max(180, viewport_w - other - 8)
+            self._setting_desc_width = True
+            try:
+                table.setColumnWidth(1, target)
+            finally:
+                self._setting_desc_width = False
+        except Exception:
+            pass
 
     def load_data(self, data):
         # Cargar de forma más liviana: pausar renders y sorting mientras se llena
@@ -165,21 +237,33 @@ class AnalisisUnitariosView(QWidget):
 
         self.table.setRowCount(len(data))
         for row, item in enumerate(data):
-            self.table.setItem(row, 0, QTableWidgetItem(item.get("codigo", "")))
+            # Código (solo lectura)
+            code_item = QTableWidgetItem(item.get("codigo", ""))
+            code_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
+            self.table.setItem(row, 0, code_item)
             
+            # Descripción (editable)
             descripcion = item.get("descripcion", "")
             descripcion_item = QTableWidgetItem(descripcion)
             descripcion_item.setToolTip(descripcion)
             self.table.setItem(row, 1, descripcion_item)
             
-            self.table.setItem(row, 2, QTableWidgetItem(item.get("unidad", "")))
+            # Unidad (solo lectura)
+            und_item = QTableWidgetItem(item.get("unidad", ""))
+            und_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
+            self.table.setItem(row, 2, und_item)
             
+            # Total (solo lectura)
             total_value = item.get('total', 0)
-            self.table.setItem(row, 3, QTableWidgetItem(f"${total_value:,.2f}"))
+            total_item = QTableWidgetItem(f"${total_value:,.2f}")
+            total_item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
+            self.table.setItem(row, 3, total_item)
 
         self.table.blockSignals(False)
         self.table.setSortingEnabled(sorting)
         self.table.setUpdatesEnabled(updates)
+        # Re-ajustar descripción tras poblar datos (las otras columnas pueden cambiar con ResizeToContents)
+        self._auto_size_description()
 
     def on_add_clicked(self):
         data = self.get_data_from_form()

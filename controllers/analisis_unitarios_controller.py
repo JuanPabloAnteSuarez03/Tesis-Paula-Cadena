@@ -59,6 +59,12 @@ class AnalisisUnitariosController(QObject):
             table.blockSignals(False)
             table.setSortingEnabled(sorting)
             table.setUpdatesEnabled(updates)
+            # Ajustar ancho de descripción para ocupar el espacio sobrante (si la vista lo soporta)
+            try:
+                if hasattr(self.view, "_auto_size_description"):
+                    self.view._auto_size_description()
+            except Exception:
+                pass
         except Exception as e:
             print("Error al cargar análisis unitarios:", e)
         finally:
