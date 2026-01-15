@@ -245,6 +245,8 @@ class AnalisisUnitariosController(QObject):
         # Guardar referencia para evitar que el GC cierre la ventana
         self._open_editors.append(editor)
 
+    # (La actualización temporal al presupuesto se movió al submenú de Presupuesto)
+
     def set_resource_controller(self, resource_controller):
         """Permite refrescar la vista principal de recursos cuando se agregan desde el editor."""
         self._resource_controller = resource_controller
