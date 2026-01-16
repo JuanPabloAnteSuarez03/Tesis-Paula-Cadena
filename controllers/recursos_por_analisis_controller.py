@@ -15,33 +15,17 @@ class RecursosPorAnalisisController(QObject):
     # Nueva señal: emite (codigo_analisis, nuevo_total) cuando cambia el total por ediciones en la tabla
     analysis_total_changed = pyqtSignal(str, float)
     
-    def __init__(
-        self,
-        codigo_analisis,
-        parent=None,
-        embed_readonly: bool = False,
-        refresh_resources_cb=None,
-        show_buttons: bool | None = None,
-        budget_apply_mode: bool = False,
-    ):
+    def __init__(self, codigo_analisis, parent=None, embed_readonly: bool = False, refresh_resources_cb=None):
         super().__init__(parent)
         self.codigo_analisis = codigo_analisis
         self.embed_readonly = bool(embed_readonly)
-        self.budget_apply_mode = bool(budget_apply_mode)
         self.refresh_resources_cb = refresh_resources_cb
         print(f"[DEBUG] Iniciando RecursosPorAnalisisController para análisis: {codigo_analisis}")
         # Si está embebido en la vista de Análisis del Presupuesto, ocultamos el formulario
         # y mostramos todas las filas completas (sin scroll interno)
         # En modo embed_readonly ocultamos formulario y botones inferiores
-        # Ocultamos el formulario manual (redundante). Los botones pueden forzarse desde fuera.
-        if show_buttons is None:
-            show_buttons_final = not embed_readonly
-        else:
-            show_buttons_final = bool(show_buttons)
-        # En modo "aplicar al presupuesto" siempre necesitamos botón inferior.
-        if self.budget_apply_mode:
-            show_buttons_final = True
-        self.view = RecursosPorAnalisisView(codigo_analisis, show_form=False, show_buttons=show_buttons_final)
+        # Ocultamos el formulario manual y el botón "Agregar a Tabla" (redundante)
+        self.view = RecursosPorAnalisisView(codigo_analisis, show_form=False, show_buttons=not embed_readonly)
         # Temporizador para auto-guardar con debounce
         self._commit_timer = QTimer()
         self._commit_timer.setSingleShot(True)
@@ -53,11 +37,7 @@ class RecursosPorAnalisisController(QObject):
         if hasattr(self.view, 'add_button') and self.view.add_button is not None:
             self.view.add_button.clicked.connect(self.open_resource_selector)
         if hasattr(self.view, 'update_button') and self.view.update_button is not None:
-            if self.budget_apply_mode:
-                self.view.update_button.setText("Aplicar al presupuesto")
-                self.view.update_button.clicked.connect(self.apply_to_budget)
-            else:
-                self.view.update_button.clicked.connect(self.update_analysis)
+            self.view.update_button.clicked.connect(self.update_analysis)
         # Formulario manual removido; no conexión a add_form_button
         # Conectar la señal dataChanged del modelo para detectar ediciones
         self.view.model.dataChanged.connect(self.on_item_changed)
@@ -97,32 +77,6 @@ class RecursosPorAnalisisController(QObject):
         """Abre un diálogo modal con la vista del selector de recursos."""
         from controllers.resource_controller import ResourceController
         resource_controller = ResourceController()
-        # En modo presupuesto-temporal, NO permitir modificar/crear recursos en BD desde el selector
-        if getattr(self, "budget_apply_mode", False):
-            try:
-                from PyQt6.QtWidgets import QAbstractItemView
-                resource_controller.view.table_view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-            except Exception:
-                pass
-            try:
-                # Ocultar/inhabilitar botones de CRUD
-                if hasattr(resource_controller.view, "add_button"):
-                    resource_controller.view.add_button.setEnabled(False)
-                    resource_controller.view.add_button.setVisible(False)
-                if hasattr(resource_controller.view, "delete_button"):
-                    resource_controller.view.delete_button.setEnabled(False)
-                    resource_controller.view.delete_button.setVisible(False)
-                # Deshabilitar inputs del formulario
-                for w in ["descripcion_input", "unidad_input", "valor_input"]:
-                    if hasattr(resource_controller.view, w):
-                        getattr(resource_controller.view, w).setEnabled(False)
-            except Exception:
-                pass
-            try:
-                # Evitar persistencia por si algo dispara dataChanged
-                resource_controller.view.model.dataChanged.disconnect(resource_controller.on_data_changed)
-            except Exception:
-                pass
         dialog = QDialog(self.view)
         dialog.setWindowTitle("Adicionar Recurso")
         dialog.resize(600, 400)
@@ -312,40 +266,18 @@ class RecursosPorAnalisisController(QObject):
             vr_parcial = cantidad * (1 + desperdicio) * vr_unitario
             self.view.model.setItem(row, 6, QStandardItem(f"${vr_parcial:,.2f}"))
 
-            # Calcular total estimado
-            total_est = self._compute_total_estimated()
-            # En modo "aplicar al presupuesto" NO emitimos automáticamente; se emite solo al presionar el botón.
-            if self.budget_apply_mode:
-                self._pending_total_est = total_est
-            else:
-                self.analysis_total_changed.emit(self.codigo_analisis, total_est)
+            # Emitir total estimado del análisis
+            total_est = 0.0
+            for r in range(self.view.model.rowCount()):
+                try:
+                    cell = self.view.model.item(r, 6)
+                    if not cell:
+                        continue
+                    text = cell.text().replace('$', '').replace(',', '')
+                    total_est += float(text) if text else 0.0
+                except Exception:
+                    pass
+            self.analysis_total_changed.emit(self.codigo_analisis, total_est)
         finally:
             self.view.model.blockSignals(False)
-
-    def _compute_total_estimated(self) -> float:
-        total_est = 0.0
-        for r in range(self.view.model.rowCount()):
-            try:
-                cell = self.view.model.item(r, 6)
-                if not cell:
-                    continue
-                text = cell.text().replace('$', '').replace(',', '')
-                total_est += float(text) if text else 0.0
-            except Exception:
-                pass
-        return total_est
-
-    def apply_to_budget(self):
-        """Aplica el total calculado al presupuesto (sin persistir en BD) y cierra."""
-        try:
-            total_est = getattr(self, "_pending_total_est", None)
-            if total_est is None:
-                total_est = self._compute_total_estimated()
-            self.analysis_total_changed.emit(self.codigo_analisis, float(total_est))
-        except Exception:
-            pass
-        try:
-            self.view.close()
-        except Exception:
-            pass
 

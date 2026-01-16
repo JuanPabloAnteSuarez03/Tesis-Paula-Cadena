@@ -95,7 +95,6 @@ class AnalisisUnitariosView(QWidget):
         buttons_layout.addWidget(self.add_button)
         buttons_layout.addWidget(self.delete_button)
         buttons_layout.addStretch(1)  # Espacio a la derecha para centrar
-
         
         # Añadir ambos layouts al contenedor
         form_layout.addLayout(fields_layout)
@@ -161,8 +160,8 @@ class AnalisisUnitariosView(QWidget):
         # Habilitar el ordenamiento al hacer clic en los encabezados
         self.table.setSortingEnabled(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        # No permitir edición directa en la tabla
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        # Permitir edición (p.ej., descripción) y bloquear columnas puntuales vía flags
+        self.table.setEditTriggers(QTableWidget.EditTrigger.AllEditTriggers)
         self.table.setAlternatingRowColors(True)
         
         # Conectar el doble clic para emitir la señal de selección
@@ -304,8 +303,6 @@ class AnalisisUnitariosView(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             # Emitimos la señal con el código a eliminar
             self.analysis_delete_requested.emit(codigo)
-
-    # (Se removieron botones de actualización BD/Presupuesto; ahora están en el submenú de Presupuesto)
 
     def get_data_from_form(self):
         descripcion = self.descripcion_input.text().strip()

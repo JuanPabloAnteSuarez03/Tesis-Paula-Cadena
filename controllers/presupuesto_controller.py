@@ -10,12 +10,10 @@ class PresupuestoController(QObject):
         super().__init__(parent)
         self.view = PresupuestoView()
         self.recursos_controller = None  # Para mantener una referencia
-        self._temp_budget_editors = []
         self.external_analisis_controller = None
         # Conexiones
         self.view.analisis_selected.connect(self.on_analisis_selected)
         self.view.analysis_edit_requested.connect(self.on_edit_analysis_in_presupuesto)
-        self.view.analysis_budget_update_requested.connect(self.on_edit_analysis_in_budget)
         print("PresupuestoController initialized")
 
     def show(self):
@@ -70,22 +68,6 @@ class PresupuestoController(QObject):
         )
         self.recursos_controller.view.show()
 
-    def on_edit_analysis_in_budget(self, analisis_code: str):
-        """Abre editor temporal (no BD) para aplicar solo al presupuesto actual."""
-        ctrl = RecursosPorAnalisisController(
-            analisis_code,
-            embed_readonly=True,
-            show_buttons=True,
-            budget_apply_mode=True,
-        )
-        ctrl.analysis_total_changed.connect(lambda code, total: self.set_analysis_unit_cost(code, total))
-        ctrl.view.show()
-        # Mantener referencia para que la ventana no se cierre por GC
-        try:
-            self._temp_budget_editors.append(ctrl)
-        except Exception:
-            pass
-
     def update_presupuesto_row(self, analisis_code):
         """Actualiza la fila del presupuesto con el nuevo costo del análisis."""
         session = SessionLocal()
@@ -112,22 +94,6 @@ class PresupuestoController(QObject):
                     break
         finally:
             session.close()
-
-    def set_analysis_unit_cost(self, analisis_code: str, new_total: float):
-        """Actualiza SOLO en la tabla del presupuesto (no persiste en BD)."""
-        try:
-            for row in range(self.view.table.rowCount()):
-                item = self.view.table.item(row, 0)
-                if item and item.data(Qt.ItemDataRole.UserRole) == analisis_code:
-                    costo_item = self.view.table.item(row, 4)
-                    if costo_item:
-                        costo_item.setText(f"${new_total:,.2f}")
-                    # recalcular total de fila y totales generales
-                    self.view.update_row_total(row)
-                    self.view.update_total_presupuesto()
-                    break
-        except Exception:
-            pass
 
     def load_analisis(self, analisis_list):
         """

@@ -23,7 +23,6 @@ from views.analisis_match_dialog import AnalisisMatchDialog
 class PresupuestoView(QWidget):
     analisis_selected = pyqtSignal(str)
     analysis_edit_requested = pyqtSignal(str)
-    analysis_budget_update_requested = pyqtSignal(str)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -212,31 +211,6 @@ class PresupuestoView(QWidget):
             desc_item.setToolTip(new_desc.strip())
             self.update_total_presupuesto()
 
-    def _get_selected_analysis_code(self) -> str | None:
-        """Obtiene el código de análisis (UserRole en col 0) de la fila seleccionada del presupuesto."""
-        try:
-            selected_items = self.table.selectedItems()
-            if not selected_items:
-                return None
-            row = selected_items[0].row()
-            item0 = self.table.item(row, 0)
-            if not item0:
-                return None
-            role = item0.data(Qt.ItemDataRole.UserRole)
-            if role in (None, "", "chapter", "subtotal"):
-                return None
-            return str(role)
-        except Exception:
-            return None
-
-    def edit_selected_analysis_in_budget(self):
-        """Abre editor temporal para aplicar solo al presupuesto (sin persistir BD)."""
-        codigo = self._get_selected_analysis_code()
-        if not codigo:
-            QMessageBox.warning(self, "Sin selección", "Selecciona una fila de análisis válida del presupuesto.")
-            return
-        self.analysis_budget_update_requested.emit(codigo)
-
     def create_buttons(self):
         """Crea un conjunto compacto de menús por categoría para reducir saturación visual."""
         button_layout = QHBoxLayout()
@@ -281,8 +255,7 @@ class PresupuestoView(QWidget):
         # Análisis
         btn_analisis = make_menu_button("Análisis", [
             ("Buscar Análisis (fila)", self.open_match_dialog_for_selected),
-            ("Actualizar análisis en BD (definitivo)", self.edit_selected_analysis),
-            ("Actualizar análisis en presupuesto (temporal)", self.edit_selected_analysis_in_budget),
+            ("Editar Análisis (fila)", self.edit_selected_analysis),
         ])
         
         # Importar / Exportar
