@@ -1,5 +1,5 @@
 # controllers/analisis_unitarios_controller.py
-from PyQt6.QtCore import QObject
+from PyQt6.QtCore import QObject, Qt
 from PyQt6.QtWidgets import QMessageBox, QDialog, QVBoxLayout, QTableWidgetItem
 from models.analisis_unitario import AnalisisUnitario
 from models.database import SessionLocal
@@ -44,7 +44,8 @@ class AnalisisUnitariosController(QObject):
 
             table.setRowCount(len(analisis_list))
             for row, a in enumerate(analisis_list):
-                table.setItem(row, 0, QTableWidgetItem(a.codigo or ""))
+                code = a.codigo or ""
+                table.setItem(row, 0, QTableWidgetItem(code))
 
                 desc = a.descripcion or ""
                 desc_item = QTableWidgetItem(desc)
@@ -69,6 +70,102 @@ class AnalisisUnitariosController(QObject):
             print("Error al cargar análisis unitarios:", e)
         finally:
             session.close()
+
+    def refresh_totals_for_codes(self, codigos: set[str] | list[str] | tuple[str, ...]):
+        """
+        Actualiza únicamente la columna 'Total' para los análisis indicados,
+        consultando la BD para asegurar consistencia total.
+        """
+        try:
+            codes_set = set(str(c) for c in (codigos or []))
+            if not codes_set:
+                return
+        except Exception:
+            return
+
+        session = SessionLocal()
+        try:
+            # IMPORTANTE: Usamos total_calculado para que coincida con load_analisis_unitarios
+            analisis_db = (
+                session.query(AnalisisUnitario)
+                .filter(AnalisisUnitario.codigo.in_(list(codes_set)))
+                .all()
+            )
+            totals_by_code = {str(a.codigo): float(a.total_calculado or 0.0) for a in analisis_db}
+
+            table = self.view.table
+            updates = table.updatesEnabled()
+            sorting = table.isSortingEnabled()
+            table.setUpdatesEnabled(False)
+            table.setSortingEnabled(False)
+            table.blockSignals(True)
+
+            # Iterar la tabla una sola vez para actualizar (más seguro que findItems con sorting)
+            for r in range(table.rowCount()):
+                item_code = table.item(r, 0)
+                if not item_code: continue
+                code = item_code.text()
+                if code in totals_by_code:
+                    total_item = table.item(r, 3)
+                    if not total_item:
+                        total_item = QTableWidgetItem()
+                        table.setItem(r, 3, total_item)
+                    total_item.setText(f"${totals_by_code[code]:,.2f}")
+
+            table.blockSignals(False)
+            table.setSortingEnabled(sorting)
+            table.setUpdatesEnabled(updates)
+            table.viewport().update()
+        except Exception as e:
+            print(f"[ERROR] refresh_totals_for_codes: {e}")
+            self.load_analisis_unitarios()
+        finally:
+            session.close()
+
+    def apply_totals_map(self, totals_by_code: dict):
+        """
+        Busca cada código en la tabla y actualiza su total al instante.
+        Funciona aunque la tabla esté ordenada (sorting).
+        """
+        try:
+            if not totals_by_code:
+                return
+            table = self.view.table
+            
+            # Pausar visualización para rapidez
+            updates = table.updatesEnabled()
+            sorting = table.isSortingEnabled()
+            table.setUpdatesEnabled(False)
+            table.setSortingEnabled(False)
+            table.blockSignals(True)
+
+            # Buscar cada código por toda la tabla (robusto ante sorting)
+            for code, total_val in totals_by_code.items():
+                # findItems busca en toda la tabla
+                items = table.findItems(str(code), Qt.MatchFlag.MatchExactly)
+                for it in items:
+                    if it.column() == 0: # Asegurar que es la columna Código
+                        r = it.row()
+                        total_item = table.item(r, 3)
+                        if not total_item:
+                            total_item = QTableWidgetItem()
+                            table.setItem(r, 3, total_item)
+                        try:
+                            total_f = float(total_val or 0.0)
+                            total_item.setText(f"${total_f:,.2f}")
+                        except Exception:
+                            pass
+
+            table.blockSignals(False)
+            table.setSortingEnabled(sorting)
+            table.setUpdatesEnabled(updates)
+            table.viewport().update() # Forzar repintado
+        except Exception as e:
+            print(f"Error en apply_totals_map: {e}")
+            try:
+                self.load_analisis_unitarios()
+            except Exception:
+                pass
 
     def on_add_analysis(self, data):
         """
@@ -116,7 +213,8 @@ class AnalisisUnitariosController(QObject):
                     new_code,
                     refresh_resources_cb=self._refresh_resources
                 )
-                editor.analysis_updated.connect(self.load_analisis_unitarios)
+                # OPTIMIZACIÓN: Refrescar solo este código en vez de recargar todo
+                editor.analysis_updated.connect(lambda: self.refresh_totals_for_codes([new_code]))
                 editor.view.show()
                 try:
                     editor.view.raise_()
@@ -164,7 +262,7 @@ class AnalisisUnitariosController(QObject):
         descripcion = self.view.table.item(row, 1).text() if self.view.table.item(row, 1) else ""
         unidad = self.view.table.item(row, 2).text() if self.view.table.item(row, 2) else ""
         try:
-            total = float(self.view.table.item(row, 3).text()) if self.view.table.item(row, 3) else 0.0
+            total = float(self.view.table.item(row, 3).text().replace('$','').replace(',','')) if self.view.table.item(row, 3) else 0.0
         except ValueError:
             total = 0.0
 
@@ -174,9 +272,8 @@ class AnalisisUnitariosController(QObject):
             if analisis:
                 analisis.descripcion = descripcion
                 analisis.unidad = unidad
-                analisis.total_calculado = total
+                analisis.total = total
                 session.commit()
-                print(f"Análisis unitario {codigo} actualizado correctamente.")
                 # Actualizar solo la fila afectada en la tabla (evita recargar todo)
                 self._update_table_row(codigo, descripcion, unidad, total)
             else:
@@ -193,9 +290,10 @@ class AnalisisUnitariosController(QObject):
         """
         try:
             table = self.view.table
-            for r in range(table.rowCount()):
-                code_item = table.item(r, 0)
-                if code_item and code_item.text() == codigo:
+            items = table.findItems(str(codigo), Qt.MatchFlag.MatchExactly)
+            for it in items:
+                if it.column() == 0:
+                    r = it.row()
                     # Descripción
                     desc_item = table.item(r, 1)
                     if not desc_item:
@@ -235,7 +333,8 @@ class AnalisisUnitariosController(QObject):
             codigo_analisis,
             refresh_resources_cb=self._refresh_resources
         )
-        editor.analysis_updated.connect(self.load_analisis_unitarios)
+        # OPTIMIZACIÓN: Refrescar solo este código en vez de recargar todo
+        editor.analysis_updated.connect(lambda: self.refresh_totals_for_codes([codigo_analisis]))
         editor.view.show()
         try:
             editor.view.raise_()

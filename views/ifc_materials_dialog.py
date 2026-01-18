@@ -101,8 +101,12 @@ class IFCMaterialsDialog(QDialog):
         path, _ = QFileDialog.getOpenFileName(self, "Abrir IFC", "", "IFC Files (*.ifc *.ifczip *.ifcZIP)")
         if not path:
             return
-        self._show_progress("Cargando IFC...")
+        
+        self._show_progress("Leyendo archivo IFC... (esto puede tardar unos segundos)")
+        QApplication.processEvents()
+        
         try:
+            # Abrir el modelo. ifcopenshell.open es síncrono y pesado.
             model = ifcopenshell.open(path)
         except Exception as e:
             self._hide_progress()
@@ -110,7 +114,7 @@ class IFCMaterialsDialog(QDialog):
             return
 
         try:
-        self._populate_from_model(model)
+            self._populate_from_model(model)
         finally:
             self._hide_progress()
 
@@ -223,58 +227,68 @@ class IFCMaterialsDialog(QDialog):
     def _populate_from_model(self, ifc):
         self.concrete_table.setRowCount(0)
         self.rebar_table.setRowCount(0)
+        
+        self._update_progress("Detectando unidades y escalas...")
+        QApplication.processEvents()
 
         # Escalas de unidades → normalizamos a m, m2, m3 y kg
-        length_scale = self._get_length_scale_m(ifc)
-        area_scale = self._get_area_scale_m2(ifc, fallback=length_scale ** 2)
-        volume_scale = self._get_volume_scale_m3(ifc, fallback=length_scale ** 3)
-        mass_scale = self._get_mass_scale_kg(ifc)
+        # Buscamos IfcUnitAssignment una sola vez para ahorrar tiempo
+        uas = ifc.by_type("IfcUnitAssignment")
+        ua = uas[0] if uas else None
+
+        length_scale = self._extract_length_scale(ua)
+        area_scale = self._extract_area_scale(ua, fallback=length_scale ** 2)
+        volume_scale = self._extract_volume_scale(ua, fallback=length_scale ** 3)
+        mass_scale = self._extract_mass_scale(ua)
 
         def add_row(elem_name, guid, ifc_type, mat_name, unit, thickness, qty):
-            r = self.table.rowCount()
-            self.table.insertRow(r)
+            r = self.concrete_table.rowCount()
+            self.concrete_table.insertRow(r)
+            # ...
             for c, val in enumerate([elem_name, guid, ifc_type, mat_name, unit, thickness, qty]):
                 item = QTableWidgetItem("" if val is None else str(val))
                 item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
-                self.table.setItem(r, c, item)
+                self.concrete_table.setItem(r, c, item)
 
         def get_qto(elem, names):
             return self._get_qto(elem, names, length_scale, area_scale, volume_scale, mass_scale)
 
         def get_material_layers(elem):
-            for rel in (elem.HasAssociations or []):
+            for rel in (getattr(elem, 'HasAssociations', None) or []):
                 if rel.is_a("IfcRelAssociatesMaterial"):
                     m = rel.RelatingMaterial
                     if not m:
                         return []
                     if m.is_a("IfcMaterial"):
-                        return [{"name": m.Name, "thickness": None}]
+                        return [{"name": getattr(m, 'Name', None), "thickness": None}]
                     if m.is_a("IfcMaterialLayerSetUsage"):
-                        layers = m.ForLayerSet.MaterialLayers or []
-                        return [{"name": (lyr.Material.Name if lyr.Material else None),
-                                 "thickness": (lyr.LayerThickness or 0) * length_scale} for lyr in layers]
+                        layers = getattr(m.ForLayerSet, 'MaterialLayers', None) or []
+                        return [{"name": (lyr.Material.Name if lyr.Material and getattr(lyr.Material, 'Name', None) else None),
+                                 "thickness": (getattr(lyr, 'LayerThickness', 0) or 0) * length_scale} for lyr in layers]
                     if m.is_a("IfcMaterialLayerSet"):
-                        layers = m.MaterialLayers or []
-                        return [{"name": (lyr.Material.Name if lyr.Material else None),
-                                 "thickness": (lyr.LayerThickness or 0) * length_scale} for lyr in layers]
+                        layers = getattr(m, 'MaterialLayers', None) or []
+                        return [{"name": (lyr.Material.Name if lyr.Material and getattr(lyr.Material, 'Name', None) else None),
+                                 "thickness": (getattr(lyr, 'LayerThickness', 0) or 0) * length_scale} for lyr in layers]
                     if m.is_a("IfcMaterialConstituentSet"):
-                        consts = m.MaterialConstituents or []
-                        return [{"name": (c.Material.Name if c.Material else None), "thickness": None} for c in consts]
+                        consts = getattr(m, 'MaterialConstituents', None) or []
+                        return [{"name": (c.Material.Name if c.Material and getattr(c.Material, 'Name', None) else None), "thickness": None} for c in consts]
             return []
 
         self._update_progress("Procesando concreto...")
+        QApplication.processEvents()
         # Poblar tabla de concreto
         try:
             self._populate_concrete_from_model(ifc, length_scale, area_scale, volume_scale, mass_scale)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error en populate_concrete: {e}")
 
         self._update_progress("Procesando acero de refuerzo...")
+        QApplication.processEvents()
         # Poblar tabla de acero de refuerzo
         try:
-            self._populate_rebar_from_model(ifc)
-        except Exception:
-            # Evitar que un fallo en acero rompa la extracción de materiales
+            self._populate_rebar_from_model(ifc, length_scale)
+        except Exception as e:
+            print(f"Error en populate_rebar: {e}")
             pass
 
     def _show_progress(self, text: str):
@@ -453,7 +467,10 @@ class IFCMaterialsDialog(QDialog):
                 found_any = False
                 for rel in (getattr(elem, 'IsDecomposedBy', None) or []):
                     if rel.is_a('IfcRelAggregates'):
-                        for ch in (getattr(rel, 'RelatedObjects', None) or []):
+                        related = getattr(rel, 'RelatedObjects', None) or []
+                        for j, ch in enumerate(related):
+                            if j % 50 == 0:
+                                QApplication.processEvents()
                             # Valor directo en el hijo
                             val = self._get_qto(ch, names, length_scale, area_scale, volume_scale, mass_scale)
                             if val is not None:
@@ -505,73 +522,92 @@ class IFCMaterialsDialog(QDialog):
             return None
 
         rows = []
+        all_elems = []
         for et in element_types:
-            for elem in ifc.by_type(et):
-                # Excluir vigas/elementos de acero estructural (IPE, HEA, HEB, etc.) del listado de Concreto
-                etype_text = (elem_type_name(elem) or '')
-                objtype_text = str(getattr(elem, 'ObjectType', '') or '')
-                mats_text = ' '.join(_collect_material_names(elem))
-                txt_all = f"{etype_text} {objtype_text} {mats_text}".lower()
-                if any(k in txt_all for k in steel_keywords):
-                    continue
-                # Volumen: sólo GrossVolume / NetVolume
-                v = self._get_qto(
-                    elem,
-                    { 'GrossVolume', 'NetVolume' },
-                    length_scale, area_scale, volume_scale, mass_scale
-                )
-                # Fallback específico para escaleras: algunos modelos usan 'Volume'
-                if v in (None, 0) and _is_stair(elem):
-                    v_alt = self._get_qto(elem, { 'Volume', 'BodyVolume' }, length_scale, area_scale, volume_scale, mass_scale)
-                    if v_alt not in (None, 0):
-                        v = v_alt
-                if v in (None, 0):
-                    # Para elementos compuestos (p.ej. IfcStair), sumar volumen desde sus componentes
-                    v_comp = _sum_child_qto(elem, { 'GrossVolume', 'NetVolume', 'Volume', 'BodyVolume' })
-                    if v_comp not in (None, 0):
-                        v = v_comp
-                # Área: CrossSectionArea / OuterSurfaceArea, con respaldo mínimo a GrossArea y GrossFootprintArea
-                a = self._get_qto(
-                    elem,
-                    { 'CrossSectionArea', 'OuterSurfaceArea', 'GrossArea', 'GrossFootprintArea' },
-                    length_scale, area_scale, volume_scale, mass_scale
-                )
-                # Fallback área para escaleras
-                if a in (None, 0) and _is_stair(elem):
-                    a_alt = self._get_qto(elem, { 'NetArea', 'Area', 'SideArea' }, length_scale, area_scale, volume_scale, mass_scale)
-                    if a_alt not in (None, 0):
-                        a = a_alt
-                if a in (None, 0):
-                    a_comp = _sum_child_qto(elem, { 'CrossSectionArea', 'OuterSurfaceArea', 'GrossArea', 'GrossFootprintArea', 'NetArea', 'Area', 'SideArea' })
-                    if a_comp not in (None, 0):
-                        a = a_comp
-                # Longitud: únicamente IfcPositiveLengthMeasure en Psets
-                l = get_positive_length(elem)
-                # Si no hay longitud pero sí volumen y área, derivar L = V / A
-                if (l is None or l == 0) and (a not in (None, 0)) and (v not in (None, 0)):
+            self._update_progress(f"Buscando elementos de concreto ({et})...")
+            all_elems.extend(ifc.by_type(et))
+            QApplication.processEvents()
+        
+        total_count = len(all_elems)
+        self.progress_bar.setRange(0, total_count)
+        
+        # Optimización: pausar repintado de tabla mientras se llena
+        self.concrete_table.setUpdatesEnabled(False)
+        self.concrete_table.setRowCount(0)
+        
+        for i, elem in enumerate(all_elems):
+            if i % 1 == 0: # Para concreto, procesar eventos en cada elemento
+                self.progress_bar.setValue(i)
+                if i % 10 == 0:
+                    self._update_progress(f"Procesando concreto: {i}/{total_count} elementos...")
+                else:
+                    QApplication.processEvents()
+                
+            # Excluir vigas/elementos de acero estructural (IPE, HEA, HEB, etc.) del listado de Concreto
+            etype_text = (elem_type_name(elem) or '')
+            objtype_text = str(getattr(elem, 'ObjectType', '') or '')
+            mats_text = ' '.join(_collect_material_names(elem))
+            txt_all = f"{etype_text} {objtype_text} {mats_text}".lower()
+            if any(k in txt_all for k in steel_keywords):
+                continue
+            # Volumen: sólo GrossVolume / NetVolume
+            v = self._get_qto(
+                elem,
+                { 'GrossVolume', 'NetVolume' },
+                length_scale, area_scale, volume_scale, mass_scale
+            )
+            # Fallback específico para escaleras: algunos modelos usan 'Volume'
+            if v in (None, 0) and _is_stair(elem):
+                v_alt = self._get_qto(elem, { 'Volume', 'BodyVolume' }, length_scale, area_scale, volume_scale, mass_scale)
+                if v_alt not in (None, 0):
+                    v = v_alt
+            if v in (None, 0):
+                # Para elementos compuestos (p.ej. IfcStair), sumar volumen desde sus componentes
+                v_comp = _sum_child_qto(elem, { 'GrossVolume', 'NetVolume', 'Volume', 'BodyVolume' })
+                if v_comp not in (None, 0):
+                    v = v_comp
+            # Área: CrossSectionArea / OuterSurfaceArea, con respaldo mínimo a GrossArea y GrossFootprintArea
+            a = self._get_qto(
+                elem,
+                { 'CrossSectionArea', 'OuterSurfaceArea', 'GrossArea', 'GrossFootprintArea' },
+                length_scale, area_scale, volume_scale, mass_scale
+            )
+            # Fallback área para escaleras
+            if a in (None, 0) and _is_stair(elem):
+                a_alt = self._get_qto(elem, { 'NetArea', 'Area', 'SideArea' }, length_scale, area_scale, volume_scale, mass_scale)
+                if a_alt not in (None, 0):
+                    a = a_alt
+            if a in (None, 0):
+                a_comp = _sum_child_qto(elem, { 'CrossSectionArea', 'OuterSurfaceArea', 'GrossArea', 'GrossFootprintArea', 'NetArea', 'Area', 'SideArea' })
+                if a_comp not in (None, 0):
+                    a = a_comp
+            # Longitud: únicamente IfcPositiveLengthMeasure en Psets
+            l = get_positive_length(elem)
+            # Si no hay longitud pero sí volumen y área, derivar L = V / A
+            if (l is None or l == 0) and (a not in (None, 0)) and (v not in (None, 0)):
+                try:
+                    l = float(v) / float(a)
+                except Exception:
+                    pass
+            # Si sigue faltando volumen en escaleras, aproximar con área de sección × longitud
+            if _is_stair(elem) and (v in (None, 0)) and (l not in (None, 0)):
+                a_section = self._get_qto(elem, { 'CrossSectionArea' }, length_scale, area_scale, volume_scale, mass_scale)
+                if a_section not in (None, 0):
                     try:
-                        l = float(v) / float(a)
+                        v = float(a_section) * float(l)
                     except Exception:
                         pass
-                # Si sigue faltando volumen en escaleras, aproximar con área de sección × longitud
-                if _is_stair(elem) and (v in (None, 0)) and (l not in (None, 0)):
-                    a_section = self._get_qto(elem, { 'CrossSectionArea' }, length_scale, area_scale, volume_scale, mass_scale)
-                    if a_section not in (None, 0):
-                        try:
-                            v = float(a_section) * float(l)
-                        except Exception:
-                            pass
 
-                bld, lvl = get_building_and_level(elem)
-                rows.append({
-                    'bld': bld,
-                    'lvl': lvl,
-                    'cat': host_category(elem),
-                    'type': elem_type_name(elem),
-                    'len': l,
-                    'area': a,
-                    'vol': v,
-                })
+            bld, lvl = get_building_and_level(elem)
+            rows.append({
+                'bld': bld,
+                'lvl': lvl,
+                'cat': host_category(elem),
+                'type': elem_type_name(elem),
+                'len': l,
+                'area': a,
+                'vol': v,
+            })
 
         # Orden solo por categoría
         rows.sort(key=lambda r: (r['cat'], r['type']))
@@ -590,6 +626,8 @@ class IFCMaterialsDialog(QDialog):
         current_cat = None
         cat_subtotal = 0.0
         while i < len(rows):
+            if i % 20 == 0:
+                self._update_progress(f"Escribiendo tabla de concreto: {i}/{len(rows)}...")
             r = rows[i]
             if r['cat'] != current_cat:
                 if current_cat is not None:
@@ -618,6 +656,9 @@ class IFCMaterialsDialog(QDialog):
 
         # Fila total proyecto
         write_row(["TOTAL PROYECTO", "", "", "", f"{total_project:.2f}"])
+        
+        self.concrete_table.setUpdatesEnabled(True)
+        self.concrete_table.viewport().update()
 
     def _export_concrete_csv(self):
         if self.concrete_table.rowCount() == 0:
@@ -660,121 +701,75 @@ class IFCMaterialsDialog(QDialog):
             for cat, v in sorted(totals.items()):
                 w.writerow([cat, f"{v:.2f}"])
 
-    def _get_length_scale_m(self, ifc):
+    def _extract_length_scale(self, ua):
+        if not ua: return 1.0
         try:
-            uas = ifc.by_type("IfcUnitAssignment")
-            if not uas:
-                return 1.0
-            ua = uas[0]
             for u in ua.Units or []:
-                # IfcSIUnit for length
                 if getattr(u, 'UnitType', None) and u.UnitType == 'LENGTHUNIT':
                     prefix = getattr(u, 'Prefix', None)
                     name = getattr(u, 'Name', None)
-                    # Default metre
-                    if name == 'METRE' and not prefix:
-                        return 1.0
-                    # Common prefixes
+                    if name == 'METRE' and not prefix: return 1.0
                     scale = 1.0
-                    if prefix == 'MILLI':
-                        scale = 0.001
-                    elif prefix == 'CENTI':
-                        scale = 0.01
-                    elif prefix == 'DECI':
-                        scale = 0.1
-                    elif prefix == 'KILO':
-                        scale = 1000.0
+                    if prefix == 'MILLI': scale = 0.001
+                    elif prefix == 'CENTI': scale = 0.01
+                    elif prefix == 'DECI': scale = 0.1
+                    elif prefix == 'KILO': scale = 1000.0
                     return scale
-        except Exception:
-            pass
+        except Exception: pass
         return 1.0
 
-    def _get_area_scale_m2(self, ifc, fallback: float = 1.0):
+    def _extract_area_scale(self, ua, fallback: float = 1.0):
+        if not ua: return fallback
         try:
-            uas = ifc.by_type("IfcUnitAssignment")
-            if not uas:
-                return fallback
-            ua = uas[0]
             for u in ua.Units or []:
                 if getattr(u, 'UnitType', None) and u.UnitType == 'AREAUNIT':
                     prefix = getattr(u, 'Prefix', None)
                     name = getattr(u, 'Name', None)
-                    # Default square metre
-                    if name == 'SQUARE_METRE' and not prefix:
-                        return 1.0
+                    if name == 'SQUARE_METRE' and not prefix: return 1.0
                     scale = 1.0
-                    if prefix == 'MILLI':
-                        scale = 0.001 ** 2
-                    elif prefix == 'CENTI':
-                        scale = 0.01 ** 2
-                    elif prefix == 'DECI':
-                        scale = 0.1 ** 2
-                    elif prefix == 'KILO':
-                        scale = 1000.0 ** 2
+                    if prefix == 'MILLI': scale = 0.001 ** 2
+                    elif prefix == 'CENTI': scale = 0.01 ** 2
+                    elif prefix == 'DECI': scale = 0.1 ** 2
+                    elif prefix == 'KILO': scale = 1000.0 ** 2
                     return scale
-        except Exception:
-            pass
+        except Exception: pass
         return fallback
 
-    def _get_volume_scale_m3(self, ifc, fallback: float = 1.0):
+    def _extract_volume_scale(self, ua, fallback: float = 1.0):
+        if not ua: return fallback
         try:
-            uas = ifc.by_type("IfcUnitAssignment")
-            if not uas:
-                return fallback
-            ua = uas[0]
             for u in ua.Units or []:
                 if getattr(u, 'UnitType', None) and u.UnitType == 'VOLUMEUNIT':
                     prefix = getattr(u, 'Prefix', None)
                     name = getattr(u, 'Name', None)
-                    # Default cubic metre
-                    if name == 'CUBIC_METRE' and not prefix:
-                        return 1.0
+                    if name == 'CUBIC_METRE' and not prefix: return 1.0
                     scale = 1.0
-                    if prefix == 'MILLI':
-                        scale = 0.001 ** 3
-                    elif prefix == 'CENTI':
-                        scale = 0.01 ** 3
-                    elif prefix == 'DECI':
-                        scale = 0.1 ** 3
-                    elif prefix == 'KILO':
-                        scale = 1000.0 ** 3
+                    if prefix == 'MILLI': scale = 0.001 ** 3
+                    elif prefix == 'CENTI': scale = 0.01 ** 3
+                    elif prefix == 'DECI': scale = 0.1 ** 3
+                    elif prefix == 'KILO': scale = 1000.0 ** 3
                     return scale
-        except Exception:
-            pass
+        except Exception: pass
         return fallback
 
-    def _get_mass_scale_kg(self, ifc):
+    def _extract_mass_scale(self, ua):
+        if not ua: return 1.0
         try:
-            uas = ifc.by_type("IfcUnitAssignment")
-            if not uas:
-                return 1.0
-            ua = uas[0]
             for u in ua.Units or []:
                 if getattr(u, 'UnitType', None) and u.UnitType == 'MASSUNIT':
                     prefix = getattr(u, 'Prefix', None)
                     name = getattr(u, 'Name', None)
-                    # Default kilogram
-                    if name == 'GRAM':
-                        return 0.001
-                    if name == 'KILOGRAM' and not prefix:
-                        return 1.0
-                    if name == 'TONNE':
-                        return 1000.0
-                    # Handle SI prefixes if provided
+                    if name == 'GRAM': return 0.001
+                    if name == 'KILOGRAM' and not prefix: return 1.0
+                    if name == 'TONNE': return 1000.0
                     scale = 1.0
-                    if prefix == 'MILLI':
-                        scale = 0.001
-                    elif prefix == 'CENTI':
-                        scale = 0.01
-                    elif prefix == 'DECI':
-                        scale = 0.1
-                    elif prefix == 'KILO':
-                        scale = 1000.0
+                    if prefix == 'MILLI': scale = 0.001
+                    elif prefix == 'CENTI': scale = 0.01
+                    elif prefix == 'DECI': scale = 0.1
+                    elif prefix == 'KILO': scale = 1000.0
                     return scale
-        except Exception:
-            pass
+        except Exception: pass
         return 1.0
-
 
     # ==========================
     #   Rebar (Acero de refuerzo)
@@ -800,9 +795,8 @@ class IFCMaterialsDialog(QDialog):
         except Exception:
             pass
         return None
-    def _populate_rebar_from_model(self, ifc):
-        # Unidades
-        length_scale = self._get_length_scale_m(ifc)
+    def _populate_rebar_from_model(self, ifc, length_scale: float):
+        # Unidades ya recibidas por parámetro
 
         # Mapa de diámetro nominal a número de varilla (NBR/ACI aproximado)
         # El IFC típicamente trae diámetro en mm. Aquí cubrimos tamaños comunes.
@@ -1089,7 +1083,19 @@ class IFCMaterialsDialog(QDialog):
 
         # Recolectar barras
         rows = []
-        for rb in ifc.by_type("IfcReinforcingBar"):
+        all_rebar = ifc.by_type("IfcReinforcingBar")
+        total_count = len(all_rebar)
+        self.progress_bar.setRange(0, total_count)
+        
+        # Optimización: pausar repintado
+        self.rebar_table.setUpdatesEnabled(False)
+        self.rebar_table.setRowCount(0)
+        
+        for i, rb in enumerate(all_rebar):
+            if i % 20 == 0: # Actualizar UI cada 20 barras (suelen ser muchas)
+                self.progress_bar.setValue(i)
+                QApplication.processEvents()
+                
             host = find_host_product(rb)
             # Priorizar categoría desde propiedades (instancia/tipo/grupo) y mapear a español
             host_cat_text = (
@@ -1256,7 +1262,9 @@ class IFCMaterialsDialog(QDialog):
             })
 
         # Escribir filas
-        for rdata in rows:
+        for i, rdata in enumerate(rows):
+            if i % 100 == 0:
+                QApplication.processEvents()
             r = self.rebar_table.rowCount()
             self.rebar_table.insertRow(r)
             for c, val in enumerate([
@@ -1284,6 +1292,9 @@ class IFCMaterialsDialog(QDialog):
                 self.rebar_table.setItem(r, c, item)
         except Exception:
             pass
+            
+        self.rebar_table.setUpdatesEnabled(True)
+        self.rebar_table.viewport().update()
 
     def _export_rebar_csv(self):
         if self.rebar_table.rowCount() == 0:

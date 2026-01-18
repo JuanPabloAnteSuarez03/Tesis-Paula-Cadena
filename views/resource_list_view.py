@@ -20,6 +20,9 @@ class MultiColumnFilterProxyModel(QSortFilterProxyModel):
         self.invalidateFilter()
 
     def filterAcceptsRow(self, source_row, source_parent):
+        # Fast-path: si no hay filtros, aceptar todo (evita costo O(n) de .lower() al cargar)
+        if not self.code_filter and not self.desc_filter:
+            return True
         model = self.sourceModel()
         index_code = model.index(source_row, 0, source_parent)
         index_desc = model.index(source_row, 1, source_parent)
@@ -167,26 +170,64 @@ class ResourceListView(QWidget):
         'data' es una lista de diccionarios con las claves:
           'codigo', 'descripcion', 'unidad' y 'valor_unitario'
         """
-        self.model.removeRows(0, self.model.rowCount())
-        for resource in data:
-            codigo_item = QStandardItem(str(resource.get("codigo", "")))
-            
-            descripcion = resource.get("descripcion", "")
-            descripcion_item = QStandardItem(descripcion)
-            descripcion_item.setToolTip(descripcion)
+        # Optimización fuerte:
+        # - Detach del proxy durante el llenado (evita filtrar/reordenar por cada cambio)
+        # - Reset del modelo en bloque (1 sola notificación a la vista)
+        tv = self.table_view
+        model = self.model
+        proxy = self.proxy_model
+        updates = tv.updatesEnabled()
+        try:
+            tv.setUpdatesEnabled(False)
+            try:
+                tv.setUniformRowHeights(True)
+            except Exception:
+                pass
 
-            unidad_item = QStandardItem(resource.get("unidad", ""))
-            
-            valor_unitario = resource.get("valor_unitario", 0)
-            valor_item = QStandardItem(f"${valor_unitario:,.2f}")
-            
-            row = [
-                codigo_item,
-                descripcion_item,
-                unidad_item,
-                valor_item
-            ]
-            self.model.appendRow(row)
+            # Detach proxy para que no procese cada inserción
+            try:
+                proxy.setSourceModel(None)
+            except Exception:
+                pass
+
+            # Reset en bloque
+            try:
+                model.beginResetModel()
+            except Exception:
+                pass
+            try:
+                model.clear()
+                model.setHorizontalHeaderLabels(["Código", "Descripción", "Unidad", "Valor Unitario"])
+                for resource in data:
+                    codigo = str(resource.get("codigo", ""))
+                    descripcion = resource.get("descripcion", "") or ""
+                    unidad = resource.get("unidad", "") or ""
+                    valor_unitario = resource.get("valor_unitario", 0) or 0
+
+                    codigo_item = QStandardItem(codigo)
+                    descripcion_item = QStandardItem(descripcion)
+                    descripcion_item.setToolTip(descripcion)
+                    unidad_item = QStandardItem(unidad)
+                    valor_item = QStandardItem(f"${float(valor_unitario):,.2f}")
+
+                    model.appendRow([codigo_item, descripcion_item, unidad_item, valor_item])
+            finally:
+                try:
+                    model.endResetModel()
+                except Exception:
+                    pass
+
+            # Reattach proxy
+            try:
+                proxy.setSourceModel(model)
+            except Exception:
+                pass
+            try:
+                proxy.invalidateFilter()
+            except Exception:
+                pass
+        finally:
+            tv.setUpdatesEnabled(updates)
 
     def on_cell_double_clicked(self, row, column):
         """
