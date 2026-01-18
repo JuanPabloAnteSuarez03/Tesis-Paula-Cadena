@@ -191,17 +191,18 @@ class RecursosPorAnalisisView(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(0, 155)
 
-        # Redimensionar filas a contenido y ajustar altura de la tabla para mostrar todas las filas
+        # Redimensionar filas a contenido, pero mantener una altura mínima decente aunque esté vacío
         self.table.resizeRowsToContents()
         try:
             header_h = self.table.horizontalHeader().height()
             rows_h = self.table.verticalHeader().length()
             frame = self.table.frameWidth() * 2
             total_h = int(header_h + rows_h + frame + 4)
-            # Si no mostramos formulario, dejamos la tabla sin scroll interno mostrando todo
-            if not getattr(self, '_show_form', True):
-                self.table.setMinimumHeight(total_h)
-                self.table.setMaximumHeight(total_h)
+            # Mínimo para que sea usable cuando el análisis aún no tiene recursos
+            min_h = 280
+            self.table.setMinimumHeight(max(min_h, total_h))
+            # No fijar máximo: queremos que expanda con la ventana
+            self.table.setMaximumHeight(16777215)
         except Exception:
             pass
 

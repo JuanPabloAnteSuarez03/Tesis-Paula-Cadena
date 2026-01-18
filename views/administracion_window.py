@@ -50,16 +50,21 @@ class AdministracionWindow(QDialog):
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        # Contenedor de profesionales (para usarlo dentro de un splitter)
-        prof_container = QWidget()
-        prof_v = QVBoxLayout(prof_container)
-        prof_v.setContentsMargins(0,0,0,0)
-        prof_v.addWidget(self.table)
-
-        # Subgastos administrativos en múltiples subtablas (apilados en vertical)
+        # Recuadro: Profesionales (soporta Min/Max)
         from PyQt6.QtWidgets import QGroupBox, QLabel, QSpacerItem, QSizePolicy, QSplitter
-        sub_box = QGroupBox("Gastos Administrativos (Subgastos)")
-        sub_layout = QVBoxLayout(sub_box)
+        prof_box = QGroupBox("Profesionales")
+        prof_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        prof_v = QVBoxLayout(prof_box)
+        prof_v.setContentsMargins(8, 8, 8, 8)
+        prof_v.setSpacing(6)
+        prof_v.addWidget(self.table, 1)
+
+        # Recuadros: Subgastos (sin scroll externo; cada sección en su propio recuadro)
+        sub_container = QWidget()
+        sub_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        sub_container_layout = QVBoxLayout(sub_container)
+        sub_container_layout.setContentsMargins(0, 0, 0, 0)
+        sub_container_layout.setSpacing(10)
 
         # Oficina / Papelería / Otros
         self.tbl_oficina = QTableWidget()
@@ -72,22 +77,15 @@ class AdministracionWindow(QDialog):
         oh.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         oh.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         oh.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        # Encabezado Oficina con botón Agregar
-        header_of = QWidget()
-        hl_of = QHBoxLayout(header_of)
-        hl_of.setContentsMargins(0,0,0,0)
-        hl_of.addWidget(QLabel("Oficina / Papelería / Otros"))
-        self.btn_add_oficina = QPushButton("Agregar")
-        self.btn_add_oficina.setFixedWidth(90)
-        hl_of.addStretch(1)
-        hl_of.addWidget(self.btn_add_oficina)
-        sub_layout.addWidget(header_of)
         self.tbl_oficina.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        # Contenedor vertical para tabla y botones de Oficina
-        of_container = QWidget()
-        of_v = QVBoxLayout(of_container)
-        of_v.setContentsMargins(0,0,0,0)
-        of_v.addWidget(self.tbl_oficina)
+        # Recuadro Oficina
+        of_box = QGroupBox("Oficina / Papelería / Otros")
+        of_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        of_v = QVBoxLayout(of_box)
+        of_v.setContentsMargins(8, 8, 8, 8)
+        of_v.setSpacing(6)
+        # Tabla + botones
+        of_v.addWidget(self.tbl_oficina, 1)
         of_btns = QHBoxLayout()
         of_btns.addStretch(1)
         self.btn_add_oficina_b = QPushButton("Agregar")
@@ -95,10 +93,10 @@ class AdministracionWindow(QDialog):
         of_btns.addWidget(self.btn_add_oficina_b)
         of_btns.addWidget(self.btn_del_oficina_b)
         of_v.addLayout(of_btns)
-        sub_layout.addWidget(of_container)
         self.lbl_subtotal_oficina = QLabel("Subtotal: $0.00")
         self.lbl_subtotal_oficina.setStyleSheet("font-weight: bold; padding: 4px 0 8px 0;")
-        sub_layout.addWidget(self.lbl_subtotal_oficina)
+        of_v.addWidget(self.lbl_subtotal_oficina)
+        sub_container_layout.addWidget(of_box)
 
         # Pólizas (porcentaje sobre base de contrato por defecto)
         self.tbl_polizas = QTableWidget()
@@ -113,23 +111,14 @@ class AdministracionWindow(QDialog):
         ph.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         ph.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         ph.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-        ph.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        # Encabezado Pólizas con botón Agregar
-        header_pol = QWidget()
-        hl_pol = QHBoxLayout(header_pol)
-        hl_pol.setContentsMargins(0,0,0,0)
-        hl_pol.addWidget(QLabel("Legalización del Contrato (Pólizas)"))
-        self.btn_add_poliza = QPushButton("Agregar")
-        self.btn_add_poliza.setFixedWidth(90)
-        hl_pol.addStretch(1)
-        hl_pol.addWidget(self.btn_add_poliza)
-        sub_layout.addWidget(header_pol)
         self.tbl_polizas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        # Contenedor vertical para tabla y botones de Polizas
-        pol_container = QWidget()
-        pol_v = QVBoxLayout(pol_container)
-        pol_v.setContentsMargins(0,0,0,0)
-        pol_v.addWidget(self.tbl_polizas)
+        # Recuadro Pólizas
+        pol_box = QGroupBox("Legalización del Contrato (Pólizas)")
+        pol_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        pol_v = QVBoxLayout(pol_box)
+        pol_v.setContentsMargins(8, 8, 8, 8)
+        pol_v.setSpacing(6)
+        pol_v.addWidget(self.tbl_polizas, 1)
         pol_btns = QHBoxLayout()
         pol_btns.addStretch(1)
         self.btn_add_poliza_b = QPushButton("Agregar")
@@ -137,10 +126,10 @@ class AdministracionWindow(QDialog):
         pol_btns.addWidget(self.btn_add_poliza_b)
         pol_btns.addWidget(self.btn_del_poliza_b)
         pol_v.addLayout(pol_btns)
-        sub_layout.addWidget(pol_container)
         self.lbl_subtotal_polizas = QLabel("Subtotal: $0.00")
         self.lbl_subtotal_polizas.setStyleSheet("font-weight: bold; padding: 4px 0 8px 0;")
-        sub_layout.addWidget(self.lbl_subtotal_polizas)
+        pol_v.addWidget(self.lbl_subtotal_polizas)
+        sub_container_layout.addWidget(pol_box)
 
         # Estampillas (porcentaje sobre base de contrato)
         self.tbl_estamp = QTableWidget()
@@ -151,22 +140,13 @@ class AdministracionWindow(QDialog):
         eh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         eh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         eh.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        eh.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        # Encabezado Estampillas con botón Agregar
-        header_est = QWidget()
-        hl_est = QHBoxLayout(header_est)
-        hl_est.setContentsMargins(0,0,0,0)
-        hl_est.addWidget(QLabel("Estampillas"))
-        self.btn_add_estamp = QPushButton("Agregar")
-        self.btn_add_estamp.setFixedWidth(90)
-        hl_est.addStretch(1)
-        hl_est.addWidget(self.btn_add_estamp)
-        sub_layout.addWidget(header_est)
-        # Contenedor vertical para Estampillas y sus botones
-        est_container = QWidget()
-        est_v = QVBoxLayout(est_container)
-        est_v.setContentsMargins(0,0,0,0)
-        est_v.addWidget(self.tbl_estamp)
+        # Recuadro Estampillas
+        est_box = QGroupBox("Estampillas")
+        est_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        est_v = QVBoxLayout(est_box)
+        est_v.setContentsMargins(8, 8, 8, 8)
+        est_v.setSpacing(6)
+        est_v.addWidget(self.tbl_estamp, 1)
         est_btns = QHBoxLayout()
         est_btns.addStretch(1)
         self.btn_add_estamp_b = QPushButton("Agregar")
@@ -174,23 +154,30 @@ class AdministracionWindow(QDialog):
         est_btns.addWidget(self.btn_add_estamp_b)
         est_btns.addWidget(self.btn_del_estamp_b)
         est_v.addLayout(est_btns)
-        sub_layout.addWidget(est_container)
         self.lbl_subtotal_estamp = QLabel("Subtotal: $0.00")
         self.lbl_subtotal_estamp.setStyleSheet("font-weight: bold; padding: 4px 0 8px 0;")
-        sub_layout.addWidget(self.lbl_subtotal_estamp)
-        # Espaciador inferior para evitar solapamiento con el siguiente bloque
-        sub_layout.setContentsMargins(8, 8, 8, 24)
-        sub_layout.addItem(QSpacerItem(20, 16, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed))
-        # Hacer que los bloques crezcan en vertical si hay espacio
-        sub_layout.addStretch(1)
+        est_v.addWidget(self.lbl_subtotal_estamp)
+        sub_container_layout.addWidget(est_box)
 
-        # Splitter vertical para ajustar profesionales vs subgastos (dar más espacio a subgastos)
-        split_v = QSplitter(Qt.Orientation.Vertical)
-        split_v.addWidget(prof_container)
-        split_v.addWidget(sub_box)
-        split_v.setStretchFactor(0, 2)
-        split_v.setStretchFactor(1, 3)
-        layout.addWidget(split_v)
+        # Splitter principal: Profesionales vs Subgastos (sin scroll; solo Min/Max en profesionales)
+        main_split = QSplitter(Qt.Orientation.Vertical)
+        main_split.setChildrenCollapsible(True)
+        main_split.addWidget(prof_box)
+        main_split.addWidget(sub_container)
+        main_split.setStretchFactor(0, 2)
+        main_split.setStretchFactor(1, 3)
+        # Evitar que el usuario arrastre el splitter (solo controlar con botones)
+        try:
+            main_split.setHandleWidth(1)
+            main_split.handle(1).setEnabled(False)
+        except Exception:
+            pass
+        layout.addWidget(main_split, 1)
+        # Guardar referencia para controlar tamaños desde botones
+        self._main_split = main_split
+        self._prof_box = prof_box
+        self._sub_container = sub_container
+        self._layout_mode = "normal"  # normal | prof_max | prof_min
         # Conexiones de botones inferiores
         self.btn_add_oficina_b.clicked.connect(self._on_add_oficina)
         self.btn_del_oficina_b.clicked.connect(self._on_del_oficina)
@@ -198,10 +185,6 @@ class AdministracionWindow(QDialog):
         self.btn_del_poliza_b.clicked.connect(self._on_del_poliza)
         self.btn_add_estamp_b.clicked.connect(self._on_add_estamp)
         self.btn_del_estamp_b.clicked.connect(self._on_del_estamp)
-        # Conexiones de botones agregar
-        self.btn_add_oficina.clicked.connect(self._on_add_oficina)
-        self.btn_add_poliza.clicked.connect(self._on_add_poliza)
-        self.btn_add_estamp.clicked.connect(self._on_add_estamp)
 
         # Percentages form
         form_widget = QWidget()
@@ -278,12 +261,19 @@ class AdministracionWindow(QDialog):
         ctrl_bar = QHBoxLayout()
         self.include_chk = QCheckBox("Agregar recomendados")
         self.include_chk.setChecked(True)
+        # Min/Max de tabla de profesionales
+        min_prof_btn = QPushButton("Minimizar profesionales")
+        max_prof_btn = QPushButton("Maximizar profesionales")
+        min_prof_btn.clicked.connect(self._minimize_professionals)
+        max_prof_btn.clicked.connect(self._maximize_professionals)
         auto_btn = QPushButton("Auto-ajustar")
         auto_btn.clicked.connect(self._on_auto_adjust)
         add_prof_btn = QPushButton("Agregar profesional…")
         add_prof_btn.clicked.connect(self._on_add_professional)
         self.include_chk.stateChanged.connect(self._reload_based_on_checkbox)
         ctrl_bar.addWidget(self.include_chk)
+        ctrl_bar.addWidget(min_prof_btn)
+        ctrl_bar.addWidget(max_prof_btn)
         ctrl_bar.addWidget(auto_btn)
         ctrl_bar.addWidget(add_prof_btn)
         layout.addLayout(ctrl_bar)
@@ -291,7 +281,7 @@ class AdministracionWindow(QDialog):
         # Botones
         btn_bar = QHBoxLayout()
         btn_bar.addStretch(1)
-        accept_btn = QPushButton("Aceptar")
+        accept_btn = QPushButton("Correr Presupuesto")
         cancel_btn = QPushButton("Cancelar")
         accept_btn.clicked.connect(self._on_accept)
         cancel_btn.clicked.connect(self.reject)
@@ -870,6 +860,67 @@ class AdministracionWindow(QDialog):
             self._recalculate()
         dlg.professional_selected.connect(_on_selected)
         dlg.exec()
+
+    # ---------- Min/Max profesionales ----------
+    def _minimize_professionals(self):
+        """Colapsa la tabla de profesionales para que los subgastos ocupen el espacio."""
+        try:
+            sp = getattr(self, "_main_split", None)
+            if sp is None:
+                return
+            prof_box = getattr(self, "_prof_box", None)
+            sub_container = getattr(self, "_sub_container", None)
+            # Toggle: si ya está minimizado, restaurar
+            if getattr(self, "_layout_mode", "normal") == "prof_min":
+                if prof_box:
+                    prof_box.setVisible(True)
+                if sub_container:
+                    sub_container.setVisible(True)
+                total = max(1, sp.height())
+                prof_h = int(total * 0.45)
+                sp.setSizes([prof_h, max(1, total - prof_h)])
+                self._layout_mode = "normal"
+                return
+
+            # Minimizar: ocultar profesionales y dejar subgastos a pantalla completa
+            if prof_box:
+                prof_box.setVisible(False)
+            if sub_container:
+                sub_container.setVisible(True)
+            sp.setSizes([0, max(1, sp.height())])
+            self._layout_mode = "prof_min"
+        except Exception:
+            pass
+
+    def _maximize_professionals(self):
+        """Maximiza profesionales ocupando todo el espacio (ocultando subgastos)."""
+        try:
+            sp = getattr(self, "_main_split", None)
+            if sp is None:
+                return
+            prof_box = getattr(self, "_prof_box", None)
+            sub_container = getattr(self, "_sub_container", None)
+            # Toggle: si ya está maximizado, restaurar
+            if getattr(self, "_layout_mode", "normal") == "prof_max":
+                if sub_container:
+                    sub_container.setVisible(True)
+                if prof_box:
+                    prof_box.setVisible(True)
+                total = max(1, sp.height())
+                prof_h = int(total * 0.65)
+                sp.setSizes([prof_h, max(1, total - prof_h)])
+                self._layout_mode = "normal"
+                return
+
+            # Maximizar: ocultar subgastos y dejar profesionales a pantalla completa
+            if sub_container:
+                sub_container.setVisible(False)
+            if prof_box:
+                prof_box.setVisible(True)
+            sp.setSizes([max(1, sp.height()), 0])
+            self._layout_mode = "prof_max"
+        except Exception:
+            pass
 
     # ---------- Add rows to subtables ----------
     def _on_add_oficina(self):

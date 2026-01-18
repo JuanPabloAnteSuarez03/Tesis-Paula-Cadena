@@ -162,12 +162,51 @@ class PresupuestoView(QWidget):
         self.analisis_controller.view.show()
 
     def on_analisis_selected_from_search(self, codigo):
-        """Oculta la ventana de búsqueda tras seleccionar (la inserción la maneja MainWindow)."""
-        if self.analisis_controller:
-            self.analisis_controller.view.hide()
+        """Inserta el análisis en el presupuesto y oculta la ventana de búsqueda si aplica."""
+        try:
+            self.analisis_selected.emit(codigo)
+        except Exception:
+            pass
+        # Solo ocultar si la vista de análisis está en una ventana independiente.
+        # Si está embebida en el panel derecho, NO la ocultamos.
+        try:
+            if self.analisis_controller and self.analisis_controller.view.isWindow():
+                self.analisis_controller.view.hide()
+        except Exception:
+            pass
+
+    def _on_insert_item_dialog_selected(self, codigo: str, dialog: QDialog):
+        """Inserta el análisis en el presupuesto y cierra el diálogo 'Insertar Ítem'."""
+        try:
+            self.analisis_selected.emit(codigo)
+        except Exception:
+            pass
+        try:
+            dialog.accept()
+        except Exception:
+            pass
 
     def open_insert_item_dialog(self):
         """Abre un diálogo independiente para seleccionar análisis sin desmontar la vista principal."""
+        # Validación: debe existir al menos un capítulo antes de insertar ítems
+        try:
+            has_chapter = False
+            for r in range(self.table.rowCount()):
+                it = self.table.item(r, 0)
+                if it and it.data(Qt.ItemDataRole.UserRole) == "chapter":
+                    has_chapter = True
+                    break
+            if not has_chapter:
+                QMessageBox.warning(
+                    self,
+                    "Agregar capítulo primero",
+                    "No puedes insertar ítems si no hay capítulos.\n\nCrea un capítulo en: Capítulos → Agregar Capítulo.",
+                )
+                return
+        except Exception:
+            # Si por alguna razón falla la validación, no bloquear la app
+            pass
+
         from controllers.analisis_unitarios_controller import AnalisisUnitariosController
         local_controller = AnalisisUnitariosController()
 
@@ -179,8 +218,10 @@ class PresupuestoView(QWidget):
         dlayout.setSpacing(4)
         dlayout.addWidget(local_controller.view)
 
-        # Conectar selección al handler existente
-        local_controller.view.analysis_selected.connect(self.on_analisis_selected_from_search)
+        # Conectar selección: insertar en presupuesto y cerrar el diálogo (sin afectar panel derecho)
+        local_controller.view.analysis_selected.connect(
+            lambda code: self._on_insert_item_dialog_selected(code, dialog)
+        )
 
         dialog.exec()
 

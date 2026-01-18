@@ -106,6 +106,12 @@ class ResourceListView(QWidget):
         self.proxy_model = MultiColumnFilterProxyModel(self)
         self.proxy_model.setSourceModel(self.model)
         self.table_view.setModel(self.proxy_model)
+        # Filas alternadas (blanco/gris) como en la tabla de la derecha
+        self.table_view.setAlternatingRowColors(True)
+        try:
+            self.table_view.verticalHeader().setDefaultSectionSize(28)
+        except Exception:
+            pass
         
         header = self.table_view.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # Código
@@ -130,14 +136,14 @@ class ResourceListView(QWidget):
         self.setStyleSheet("""
             QTableView {
                 background-color: #f9f9f9;
-                alternate-background-color: #e0e0e0;
+                alternate-background-color: #f0f0f0;
                 gridline-color: #cccccc;
-                font-size: 13px;
+                font-size: 14px;
             }
             QHeaderView::section {
                 background-color: #0078d7;
                 color: white;
-                padding: 8px;
+                padding: 4px;
                 font-weight: bold;
                 border: 0px;
             }

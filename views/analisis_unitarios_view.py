@@ -31,6 +31,7 @@ class AnalisisUnitariosView(QWidget):
         self.setStyleSheet("""
             QTableWidget {
                 background-color: #f9f9f9;
+                alternate-background-color: #f0f0f0;
                 gridline-color: #cccccc;
                 font-size: 14px;
             }
@@ -160,8 +161,8 @@ class AnalisisUnitariosView(QWidget):
         # Habilitar el ordenamiento al hacer clic en los encabezados
         self.table.setSortingEnabled(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        # Permitir edición (p.ej., descripción) y bloquear columnas puntuales vía flags
-        self.table.setEditTriggers(QTableWidget.EditTrigger.AllEditTriggers)
+        # No permitir edición directa en la tabla
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
         
         # Conectar el doble clic para emitir la señal de selección
