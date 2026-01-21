@@ -23,6 +23,9 @@ class StartWindow(QWidget):
         super().__init__(parent)
         self.setWindowTitle("App Presupuestos")
         self.resize(520, 400)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
+        self._drag_active = False
+        self._drag_offset = None
         self.setStyleSheet(
             """
             QWidget {
@@ -99,4 +102,21 @@ class StartWindow(QWidget):
 
     def _emit_start(self):
         self.start_requested.emit()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_active = True
+            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_active and self._drag_offset is not None:
+            self.move(event.globalPosition().toPoint() - self._drag_offset)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_active = False
+            self._drag_offset = None
+        super().mouseReleaseEvent(event)
 

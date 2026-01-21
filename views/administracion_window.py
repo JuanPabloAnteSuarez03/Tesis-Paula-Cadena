@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QTableWidget, QTableWidgetItem, QLabel,
-    QPushButton, QHBoxLayout, QHeaderView, QDoubleSpinBox, QFormLayout, QWidget, QCheckBox
+    QPushButton, QHBoxLayout, QHeaderView, QDoubleSpinBox, QFormLayout, QWidget, QCheckBox,
+    QScrollArea, QAbstractScrollArea
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -30,10 +31,21 @@ class AdministracionWindow(QDialog):
         self._build_ui()
         self._load_profesionales()
         self._recalculate()
+        self._resize_all_tables()
 
     # ---------- UI ----------
     def _build_ui(self):
         layout = QVBoxLayout(self)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        layout.addWidget(scroll, 1)
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(8, 8, 8, 8)
+        content_layout.setSpacing(8)
+        scroll.setWidget(content)
 
         # Tabla profesionales
         self.table = QTableWidget()
@@ -43,6 +55,7 @@ class AdministracionWindow(QDialog):
         ])
         # Altura flexible: sin mínimo fijo para no romper en pantalla completa
         self.table.setMinimumHeight(0)
+        self.table.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -71,6 +84,7 @@ class AdministracionWindow(QDialog):
         self.tbl_oficina.setColumnCount(5)
         self.tbl_oficina.setHorizontalHeaderLabels(["Concepto", "Valor Base", "% Dedic.", "Meses", "Valor"]) 
         self.tbl_oficina.setMinimumHeight(0)
+        self.tbl_oficina.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
         oh = self.tbl_oficina.horizontalHeader()
         oh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         oh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -103,6 +117,7 @@ class AdministracionWindow(QDialog):
         self.tbl_polizas.setColumnCount(7)
         self.tbl_polizas.setHorizontalHeaderLabels(["Concepto", "% Req.", "Meses", "% Prima", "Valor Base", "% Dedic.", "Valor"])
         self.tbl_polizas.setMinimumHeight(0)
+        self.tbl_polizas.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
         ph = self.tbl_polizas.horizontalHeader()
         ph.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         ph.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -136,6 +151,7 @@ class AdministracionWindow(QDialog):
         self.tbl_estamp.setColumnCount(3)
         self.tbl_estamp.setHorizontalHeaderLabels(["Concepto", "% Tasa", "Valor"])
         self.tbl_estamp.setMinimumHeight(0)
+        self.tbl_estamp.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
         eh = self.tbl_estamp.horizontalHeader()
         eh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         eh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -172,7 +188,7 @@ class AdministracionWindow(QDialog):
             main_split.handle(1).setEnabled(False)
         except Exception:
             pass
-        layout.addWidget(main_split, 1)
+        content_layout.addWidget(main_split, 1)
         # Guardar referencia para controlar tamaños desde botones
         self._main_split = main_split
         self._prof_box = prof_box
@@ -229,7 +245,7 @@ class AdministracionWindow(QDialog):
         self.meses_global_spin.setSingleStep(0.5)
         form_layout.addRow("Duración del proyecto", self.meses_global_spin)
         # Ya no mostramos spinners individuales, se controlan desde subtablas
-        layout.addWidget(form_widget)
+        content_layout.addWidget(form_widget)
 
         # Totales
         self.tot_admin_lbl = QLabel("Administración: $0.00")
@@ -255,28 +271,21 @@ class AdministracionWindow(QDialog):
             totals_layout.addWidget(lbl)
         # Ajuste para evitar que el texto inferior se corte; dar más holgura
         totals_panel.setMaximumHeight(200)
-        layout.addWidget(totals_panel)
+        content_layout.addWidget(totals_panel)
 
         # Controls row for checkbox and add button
         ctrl_bar = QHBoxLayout()
         self.include_chk = QCheckBox("Agregar recomendados")
         self.include_chk.setChecked(True)
-        # Min/Max de tabla de profesionales
-        min_prof_btn = QPushButton("Minimizar profesionales")
-        max_prof_btn = QPushButton("Maximizar profesionales")
-        min_prof_btn.clicked.connect(self._minimize_professionals)
-        max_prof_btn.clicked.connect(self._maximize_professionals)
         auto_btn = QPushButton("Auto-ajustar")
         auto_btn.clicked.connect(self._on_auto_adjust)
         add_prof_btn = QPushButton("Agregar profesional…")
         add_prof_btn.clicked.connect(self._on_add_professional)
         self.include_chk.stateChanged.connect(self._reload_based_on_checkbox)
         ctrl_bar.addWidget(self.include_chk)
-        ctrl_bar.addWidget(min_prof_btn)
-        ctrl_bar.addWidget(max_prof_btn)
         ctrl_bar.addWidget(auto_btn)
         ctrl_bar.addWidget(add_prof_btn)
-        layout.addLayout(ctrl_bar)
+        content_layout.addLayout(ctrl_bar)
 
         # Botones
         btn_bar = QHBoxLayout()
@@ -287,7 +296,8 @@ class AdministracionWindow(QDialog):
         cancel_btn.clicked.connect(self.reject)
         btn_bar.addWidget(accept_btn)
         btn_bar.addWidget(cancel_btn)
-        layout.addLayout(btn_bar)
+        content_layout.addLayout(btn_bar)
+        content_layout.addStretch(1)
 
         # Conexiones
         self.table.itemChanged.connect(self._recalculate)
@@ -316,6 +326,7 @@ class AdministracionWindow(QDialog):
             self._on_global_months_changed(None)
         except Exception:
             pass
+        self._resize_all_tables()
 
     def _add_row(self, prof):
         row = self.table.rowCount()
@@ -416,6 +427,7 @@ class AdministracionWindow(QDialog):
             self.tbl_estamp.setItem(r, 1, QTableWidgetItem(f"{rate*100:.2f}"))
             v = QTableWidgetItem("$0.00")
             self.tbl_estamp.setItem(r, 2, v)
+        self._resize_all_tables()
 
     # ---------- Logic ----------
     def _recalculate(self):
@@ -858,69 +870,9 @@ class AdministracionWindow(QDialog):
         def _on_selected(prof_dict):
             self._add_row(prof_dict)
             self._recalculate()
+            self._resize_all_tables()
         dlg.professional_selected.connect(_on_selected)
         dlg.exec()
-
-    # ---------- Min/Max profesionales ----------
-    def _minimize_professionals(self):
-        """Colapsa la tabla de profesionales para que los subgastos ocupen el espacio."""
-        try:
-            sp = getattr(self, "_main_split", None)
-            if sp is None:
-                return
-            prof_box = getattr(self, "_prof_box", None)
-            sub_container = getattr(self, "_sub_container", None)
-            # Toggle: si ya está minimizado, restaurar
-            if getattr(self, "_layout_mode", "normal") == "prof_min":
-                if prof_box:
-                    prof_box.setVisible(True)
-                if sub_container:
-                    sub_container.setVisible(True)
-                total = max(1, sp.height())
-                prof_h = int(total * 0.45)
-                sp.setSizes([prof_h, max(1, total - prof_h)])
-                self._layout_mode = "normal"
-                return
-
-            # Minimizar: ocultar profesionales y dejar subgastos a pantalla completa
-            if prof_box:
-                prof_box.setVisible(False)
-            if sub_container:
-                sub_container.setVisible(True)
-            sp.setSizes([0, max(1, sp.height())])
-            self._layout_mode = "prof_min"
-        except Exception:
-            pass
-
-    def _maximize_professionals(self):
-        """Maximiza profesionales ocupando todo el espacio (ocultando subgastos)."""
-        try:
-            sp = getattr(self, "_main_split", None)
-            if sp is None:
-                return
-            prof_box = getattr(self, "_prof_box", None)
-            sub_container = getattr(self, "_sub_container", None)
-            # Toggle: si ya está maximizado, restaurar
-            if getattr(self, "_layout_mode", "normal") == "prof_max":
-                if sub_container:
-                    sub_container.setVisible(True)
-                if prof_box:
-                    prof_box.setVisible(True)
-                total = max(1, sp.height())
-                prof_h = int(total * 0.65)
-                sp.setSizes([prof_h, max(1, total - prof_h)])
-                self._layout_mode = "normal"
-                return
-
-            # Maximizar: ocultar subgastos y dejar profesionales a pantalla completa
-            if sub_container:
-                sub_container.setVisible(False)
-            if prof_box:
-                prof_box.setVisible(True)
-            sp.setSizes([max(1, sp.height()), 0])
-            self._layout_mode = "prof_max"
-        except Exception:
-            pass
 
     # ---------- Add rows to subtables ----------
     def _on_add_oficina(self):
@@ -932,6 +884,7 @@ class AdministracionWindow(QDialog):
         self.tbl_oficina.setItem(r, 3, QTableWidgetItem(f"{self.meses_global_spin.value():.2f}"))
         self.tbl_oficina.setItem(r, 4, QTableWidgetItem("$0.00"))
         self._recalculate()
+        self._resize_all_tables()
 
     def _on_add_poliza(self):
         r = self.tbl_polizas.rowCount()
@@ -944,6 +897,7 @@ class AdministracionWindow(QDialog):
         self.tbl_polizas.setItem(r, 5, QTableWidgetItem("0.00"))   # % Dedic.
         self.tbl_polizas.setItem(r, 6, QTableWidgetItem("$0.00"))  # Valor
         self._recalculate()
+        self._resize_all_tables()
 
     def _on_add_estamp(self):
         r = self.tbl_estamp.rowCount()
@@ -952,6 +906,7 @@ class AdministracionWindow(QDialog):
         self.tbl_estamp.setItem(r, 1, QTableWidgetItem("0.00"))  # % tasa
         self.tbl_estamp.setItem(r, 2, QTableWidgetItem("$0.00"))
         self._recalculate()
+        self._resize_all_tables()
 
     def _on_del_oficina(self):
         idxs = self.tbl_oficina.selectionModel().selectedRows()
@@ -967,6 +922,7 @@ class AdministracionWindow(QDialog):
                 continue
             self.tbl_oficina.removeRow(r)
         self._recalculate()
+        self._resize_all_tables()
 
     def _on_del_poliza(self):
         idxs = self.tbl_polizas.selectionModel().selectedRows()
@@ -981,6 +937,7 @@ class AdministracionWindow(QDialog):
                 continue
             self.tbl_polizas.removeRow(r)
         self._recalculate()
+        self._resize_all_tables()
 
     def _on_del_estamp(self):
         idxs = self.tbl_estamp.selectionModel().selectedRows()
@@ -995,6 +952,7 @@ class AdministracionWindow(QDialog):
                 continue
             self.tbl_estamp.removeRow(r)
         self._recalculate()
+        self._resize_all_tables()
 
     # ---------- Auto adjust ----------
     def _on_auto_adjust(self):
@@ -1130,3 +1088,21 @@ class AdministracionWindow(QDialog):
                     self.tbl_estamp.item(idx,2).setText(f"{util:.4f}")
 
         self._recalculate() 
+        self._resize_all_tables()
+
+    def _resize_all_tables(self):
+        for tbl in (self.table, self.tbl_oficina, self.tbl_polizas, self.tbl_estamp):
+            if tbl is not None:
+                self._fit_table_height(tbl)
+
+    def _fit_table_height(self, table: QTableWidget):
+        try:
+            table.resizeRowsToContents()
+            header_h = table.horizontalHeader().height()
+            rows_h = table.verticalHeader().length()
+            frame_h = table.frameWidth() * 2
+            total_h = max(0, header_h + rows_h + frame_h)
+            table.setMinimumHeight(total_h)
+            table.setMaximumHeight(total_h)
+        except Exception:
+            pass

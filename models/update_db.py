@@ -141,80 +141,87 @@ def cargar_profesionales_desde_excel(excel_file, sheet_name=0):
         # están los títulos (en tu archivo no viene en la primera fila).
         df_raw = pd.read_excel(excel_file, sheet_name=sheet_name, header=None)
 
-        # Buscar la fila que contenga la palabra "valor mensual" para usarla
-        # como encabezado.
+        # Buscar la fila que contenga palabras clave para usarla como encabezado.
         header_idx = None
-        for idx in range(len(df_raw)):
-            row_lower = [str(x).lower() if isinstance(x, str) else "" for x in df_raw.iloc[idx]]
-            if any("valor mensual" in cell for cell in row_lower):
+        keywords = ["valor mensual", "valor total", "dedicación", "cargo", "profesional"]
+        for idx in range(min(len(df_raw), 20)):
+            row_vals = df_raw.iloc[idx]
+            row_lower = [str(x).lower() if not pd.isna(x) else "" for x in row_vals]
+            if any(any(k in cell for k in keywords) for cell in row_lower):
                 header_idx = idx
                 break
 
         if header_idx is None:
-            print("❌ No se encontró fila de encabezados (no aparece 'Valor Mensual').")
+            print("❌ No se encontró fila de encabezados (no aparece ninguna palabra clave).")
             return
 
         # Crear el DataFrame definitivo tomando como header la fila detectada
-        header_values = [str(x).strip().lower() for x in df_raw.iloc[header_idx]]
+        raw_headers = [str(x).strip().lower() if not pd.isna(x) else "nan" for x in df_raw.iloc[header_idx]]
+        
+        # HACER CABECERAS ÚNICAS para evitar el error "The truth value of a Series is ambiguous"
+        seen = {}
+        unique_headers = []
+        for h in raw_headers:
+            if h in seen:
+                seen[h] += 1
+                unique_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                unique_headers.append(h)
+        
         df = df_raw.iloc[header_idx + 1:].copy()
-        df.columns = header_values
-        # Reemplazar cabeceras vacías o 'unnamed' con identificadores provisionales
-        df.columns = [c if c and not str(c).lower().startswith('unnamed') else f'unnamed:{i}' for i, c in enumerate(df.columns)]
+        df.columns = unique_headers
 
-        # Intentar localizar la columna de salario (contiene 'valor mensual')
-        salario_col = next((col for col in df.columns if 'valor mensual' in str(col).lower()), None)
+        # Intentar localizar la columna de salario
+        salario_col = next((col for col in df.columns if any(k in str(col) for k in ["valor mensual", "valor total en pesos"])), None)
         if salario_col is None:
-            print("❌ No se encontró la columna de 'Valor Mensual'. Encabezados:", df.columns.tolist())
+            print("❌ No se encontró la columna de Salario. Encabezados:", df.columns.tolist())
             return
 
-        # Supongamos que la columna de nombre está inmediatamente antes del salario
-        salario_idx = list(df.columns).index(salario_col)
-        if salario_idx == 0:
-            print("❌ No se pudo inferir la columna de nombres (está justo al inicio). Encabezados:", df.columns.tolist())
-            return
-        nombre_col = df.columns[salario_idx - 1]
-
-        # Si cargo no está claramente identificado, lo dejaremos como nombre
-        cargo_col = None
-
-        # El archivo no trae columna 'Necesario'; definiremos True hasta que aparezca la fila 'VALOR TOTAL PROFESIONALES'
-        necesario_col = None
+        # Intentar localizar la columna de nombre/cargo
+        # Buscamos la columna que contenga "cargo" o "profesional", o la que esté a la izquierda de dedicación/salario
+        nombre_col = next((col for col in df.columns if any(k in str(col) for k in ["cargo", "profesional", "nombre"])), None)
+        if not nombre_col:
+            salario_idx = list(df.columns).index(salario_col)
+            # Retroceder desde el salario buscando una columna que no sea "nan"
+            for i in range(salario_idx - 1, -1, -1):
+                if "nan" not in df.columns[i]:
+                    nombre_col = df.columns[i]
+                    break
+        
+        if not nombre_col:
+            nombre_col = df.columns[1] # Fallback a la segunda columna
 
         # Limpiar filas vacías/NaN y detectar sección obligatoria / opcional
         profesionales_rows = []
         mandatory = True
         for _, row in df.iterrows():
-            nombre_val = row.get(nombre_col, None)
-            # Saltar filas sin nombre o con NaN
-            if nombre_val is None or (isinstance(nombre_val, float) and pd.isna(nombre_val)):
+            nombre_val = row[nombre_col]
+            if pd.isna(nombre_val) or str(nombre_val).strip().lower() in ["", "nan", "none"]:
                 continue
+            
             nombre_raw = str(nombre_val).strip()
-            if not nombre_raw or nombre_raw.lower() in ("nan", "none"):
+            if 'valor total' in nombre_raw.lower() and 'profesionales' in nombre_raw.lower():
+                mandatory = False
                 continue
-            nombre_low = nombre_raw.lower()
-            if 'valor total' in nombre_low:
-                mandatory = False  # Las filas siguientes serán consideradas no obligatorias
-                continue  # Saltar la fila de subtotal
+            
             profesionales_rows.append((row, mandatory))
 
         with conn.cursor() as cursor:
             for row, es_mandatorio in profesionales_rows:
-                # Nombre
-                nombre_val = row.get(nombre_col)
-                nombre = str(nombre_val).strip() if not pd.isna(nombre_val) else ""
-                if not nombre or nombre.lower() in ("nan", "none"):
-                    continue
-                # Cargo
-                cargo_raw_val = row.get(cargo_col) if cargo_col else nombre
-                if pd.isna(cargo_raw_val):
-                    cargo = nombre
-                else:
-                    cargo = str(cargo_raw_val).strip() or nombre
+                nombre = str(row[nombre_col]).strip()
+                cargo = nombre # Por defecto el cargo es el nombre si no hay otra columna
+                
                 try:
-                    salario_str = str(row.get(salario_col)).replace("$", "").replace(".", "").replace(",", ".")
-                    salario = float(salario_str)
+                    salario_val = row[salario_col]
+                    if pd.isna(salario_val):
+                        salario = 0.0
+                    else:
+                        salario_str = str(salario_val).replace("$", "").replace(".", "").replace(",", ".")
+                        salario = float(salario_str)
                 except (ValueError, TypeError):
                     salario = 0.0
+                
                 necesario = es_mandatorio
 
                 cursor.execute(
