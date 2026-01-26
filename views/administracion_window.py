@@ -424,7 +424,13 @@ class AdministracionWindow(QDialog):
             r = self.tbl_estamp.rowCount()
             self.tbl_estamp.insertRow(r)
             self.tbl_estamp.setItem(r, 0, QTableWidgetItem(nombre))
-            self.tbl_estamp.setItem(r, 1, QTableWidgetItem(f"{rate*100:.2f}"))
+            rate_item = QTableWidgetItem(f"{rate*100:.2f}")
+            # Guardar tasa base para autoajuste idempotente
+            try:
+                rate_item.setData(Qt.ItemDataRole.UserRole, rate * 100.0)
+            except Exception:
+                pass
+            self.tbl_estamp.setItem(r, 1, rate_item)
             v = QTableWidgetItem("$0.00")
             self.tbl_estamp.setItem(r, 2, v)
         self._resize_all_tables()
@@ -961,12 +967,13 @@ class AdministracionWindow(QDialog):
             return
         admin_obj = self.costo_directo * (admin_pct/100.0)
 
-        # 1) Ajustar profesionales: mantener % dedicación fija (Director 50%, demás 100%)
-        # y ESCALAR el salario mostrado según el objetivo (sin acumular).
-        # Base para repartir: salario_base * meses
+        # 1) Ajustar profesionales: mantener % dedicación fija
+        # y ESCALAR el salario mensual para que el total (salario * dedicación * meses)
+        # llegue al objetivo de administración asignado a profesionales.
         base_prof = 0.0
         salarios_base = []
         meses_list = []
+        dedic_list = []
         for row in range(self.table.rowCount()):
             sal_item = self.table.item(row,2)
             try:
@@ -985,18 +992,18 @@ class AdministracionWindow(QDialog):
             except Exception:
                 m = 0.0
             meses_list.append(m)
-            base_prof += sal_base * m
+            try:
+                dedic = float((self.table.item(row,3).text() or '0').strip())
+            except Exception:
+                dedic = 0.0
+            dedic_list.append(dedic)
+            base_prof += sal_base * (dedic/100.0) * m
 
         admin_alloc_prof = admin_obj * 0.5 if base_prof > 0 else 0.0
-        # Escalar salarios proporcionalmente a su peso (salario_base*meses)
+        scale = (admin_alloc_prof / base_prof) if base_prof > 0 else 1.0
+        # Escalar salario mensual para cumplir objetivo (respetando % dedicación y meses)
         for row in range(self.table.rowCount()):
-            weight = salarios_base[row] * meses_list[row]
-            if base_prof > 0 and weight > 0:
-                extra_total = admin_alloc_prof * (weight / base_prof)
-                # salario nuevo = salario_base + (extra_total / meses)
-                new_salary = salarios_base[row] + (extra_total / max(meses_list[row], 1e-9))
-            else:
-                new_salary = salarios_base[row]
+            new_salary = salarios_base[row] * scale if salarios_base[row] > 0 else 0.0
             sal_item = self.table.item(row,2)
             if sal_item is not None:
                 # mostrar el nuevo salario pero NO sobrescribir el base guardado
@@ -1010,7 +1017,8 @@ class AdministracionWindow(QDialog):
         for r in range(self.tbl_polizas.rowCount()):
             self.tbl_polizas.item(r,5).setText("0.00")  # % Dedic.
         for r in range(self.tbl_estamp.rowCount()):
-            self.tbl_estamp.item(r,2).setText("0.00")  # % Dedic.
+            # Valor se recalcula siempre en _recalculate()
+            self.tbl_estamp.item(r,2).setText("0.00")
 
         self._recalculate()  # update values with zeros base
         rows = []
@@ -1038,7 +1046,14 @@ class AdministracionWindow(QDialog):
             elif kind == 'polizas':
                 val = self._parse_money(self.tbl_polizas.item(idx,4).text())
             else:
-                val = self._parse_money(self.tbl_estamp.item(idx,1).text())
+                rate_item = self.tbl_estamp.item(idx,1)
+                try:
+                    tasa_base = float(rate_item.data(Qt.ItemDataRole.UserRole)) if rate_item is not None else 0.0
+                except Exception:
+                    tasa_base = 0.0
+                if tasa_base <= 0 and rate_item is not None:
+                    tasa_base = self._parse_money(rate_item.text())
+                val = self.costo_directo * (tasa_base/100.0)
             current_vals.append(val)
             current_sum += val
 
@@ -1063,9 +1078,8 @@ class AdministracionWindow(QDialog):
                     util = (per / (base_v + 1e-9)) * 100.0 if base_v > 0 else 0.0
                     self.tbl_polizas.item(idx,5).setText(f"{util:.4f}")
                 else:
-                    base_v = self._parse_money(self.tbl_estamp.item(idx,1).text())
-                    util = (per / (base_v + 1e-9)) * 100.0 if base_v > 0 else 0.0
-                    self.tbl_estamp.item(idx,2).setText(f"{util:.4f}")
+                    util = (per / (self.costo_directo + 1e-9)) * 100.0 if self.costo_directo > 0 else 0.0
+                    self.tbl_estamp.item(idx,1).setText(f"{util:.4f}")
         elif current_sum > 0:
             for (kind, idx), cur in zip(rows, current_vals):
                 target = admin_alloc_sub * (cur / current_sum)
@@ -1083,9 +1097,8 @@ class AdministracionWindow(QDialog):
                     util = (target / (base_v + 1e-9)) * 100.0 if base_v>0 else 0.0
                     self.tbl_polizas.item(idx,5).setText(f"{util:.4f}")
                 else:
-                    base_v = self._parse_money(self.tbl_estamp.item(idx,1).text())
-                    util = (target / (base_v + 1e-9)) * 100.0 if base_v>0 else 0.0
-                    self.tbl_estamp.item(idx,2).setText(f"{util:.4f}")
+                    util = (target / (self.costo_directo + 1e-9)) * 100.0 if self.costo_directo > 0 else 0.0
+                    self.tbl_estamp.item(idx,1).setText(f"{util:.4f}")
 
         self._recalculate() 
         self._resize_all_tables()
