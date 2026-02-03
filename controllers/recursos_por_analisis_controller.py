@@ -323,17 +323,17 @@ class RecursosPorAnalisisController(QObject):
             self.view.model.blockSignals(False)
 
     def _compute_total_estimated(self) -> float:
-        total_est = 0.0
-        for r in range(self.view.model.rowCount()):
-            try:
-                cell = self.view.model.item(r, 6)
-                if not cell:
-                    continue
-                text = cell.text().replace('$', '').replace(',', '')
-                total_est += float(text) if text else 0.0
-            except Exception:
-                pass
-        return total_est
+            total_est = 0.0
+            for r in range(self.view.model.rowCount()):
+                try:
+                    cell = self.view.model.item(r, 6)
+                    if not cell:
+                        continue
+                    text = cell.text().replace('$', '').replace(',', '')
+                    total_est += float(text) if text else 0.0
+                except Exception:
+                    pass
+            return total_est
 
     def apply_to_budget(self):
         """Aplica el total calculado al presupuesto (sin persistir en BD) y cierra."""

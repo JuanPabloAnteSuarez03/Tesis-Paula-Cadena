@@ -182,7 +182,7 @@ def cargar_profesionales_desde_excel(excel_file, sheet_name=0):
         # Buscamos la columna que contenga "cargo" o "profesional", o la que esté a la izquierda de dedicación/salario
         nombre_col = next((col for col in df.columns if any(k in str(col) for k in ["cargo", "profesional", "nombre"])), None)
         if not nombre_col:
-            salario_idx = list(df.columns).index(salario_col)
+        salario_idx = list(df.columns).index(salario_col)
             # Retroceder desde el salario buscando una columna que no sea "nan"
             for i in range(salario_idx - 1, -1, -1):
                 if "nan" not in df.columns[i]:
@@ -218,7 +218,7 @@ def cargar_profesionales_desde_excel(excel_file, sheet_name=0):
                         salario = 0.0
                     else:
                         salario_str = str(salario_val).replace("$", "").replace(".", "").replace(",", ".")
-                        salario = float(salario_str)
+                    salario = float(salario_str)
                 except (ValueError, TypeError):
                     salario = 0.0
                 

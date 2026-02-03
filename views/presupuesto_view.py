@@ -318,11 +318,11 @@ class PresupuestoView(QWidget):
 
     def open_ifc_materials_dialog(self):
         try:
-            from .ifc_materials_dialog import IFCMaterialsDialog
+            from .ifc_model_viewer_dialog import IFCModelViewerDialog
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo cargar el diálogo IFC:\n{e}")
             return
-        dlg = IFCMaterialsDialog(self)
+        dlg = IFCModelViewerDialog(self)
         dlg.exec()
 
     def open_import_text_dialog(self, prefill_rows=None, append: bool = False):

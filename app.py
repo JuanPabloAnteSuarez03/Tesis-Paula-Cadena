@@ -27,6 +27,29 @@ if __name__ == "__main__":
     except Exception:
         pass
 
+    # Estilos globales para hover/selección visibles (modo oscuro y claro)
+    app.setStyleSheet(
+        """
+        QTableWidget::item:hover,
+        QTableView::item:hover,
+        QTreeWidget::item:hover {
+            background-color: #e6f2ff;
+        }
+        QTableWidget::item:selected,
+        QTableView::item:selected,
+        QTreeWidget::item:selected {
+            background-color: #cce8ff;
+            color: #000000;
+        }
+        QTableWidget::item:selected:active,
+        QTableView::item:selected:active,
+        QTreeWidget::item:selected:active {
+            background-color: #b6ddff;
+            color: #000000;
+        }
+        """
+    )
+
     start = StartWindow()
     start.start_requested.connect(lambda: launch_main(start))
     start.show()
