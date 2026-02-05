@@ -23,6 +23,7 @@ from views.analisis_match_dialog import AnalisisMatchDialog
 class PresupuestoView(QWidget):
     analisis_selected = pyqtSignal(str)
     analysis_edit_requested = pyqtSignal(str)
+    ifc_loaded = pyqtSignal(object)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -320,10 +321,42 @@ class PresupuestoView(QWidget):
         try:
             from .ifc_model_viewer_dialog import IFCModelViewerDialog
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"No se pudo cargar el diálogo IFC:\n{e}")
+            QMessageBox.critical(self, "Error", f"No se pudo cargar el visor IFC:\n{e}")
             return
         dlg = IFCModelViewerDialog(self)
         dlg.exec()
+        ruta = dlg.get_loaded_path()
+        model = None
+        try:
+            model = dlg.get_loaded_model()
+        except Exception:
+            model = None
+        if ruta or model:
+            # Pasar el diálogo completo para reutilizar estado procesado
+            self.ifc_loaded.emit({"path": ruta, "model": model, "dialog": dlg})
+            # Refrescar panel de recursos solo al cerrar el diálogo (no al redimensionar)
+            self._refresh_left_panel_after_ifc_close()
+    
+    def _refresh_left_panel_after_ifc_close(self):
+        """Refresca el panel de recursos después de cerrar el diálogo IFC."""
+        try:
+            # Buscar MainWindow y refrescar el panel izquierdo
+            widget = self.parent()
+            max_depth = 10
+            depth = 0
+            while widget is not None and depth < max_depth:
+                class_name = widget.__class__.__name__
+                if class_name == 'MainWindow' and hasattr(widget, 'refresh_left_panel_for_ifc'):
+                    # Refrescar sin pasar tamaño (usa el efecto estándar de carga)
+                    widget.refresh_left_panel_for_ifc(dialog_size=None)
+                    break
+                try:
+                    widget = widget.parent()
+                except Exception:
+                    break
+                depth += 1
+        except Exception:
+            pass
 
     def open_import_text_dialog(self, prefill_rows=None, append: bool = False):
         dialog = ImportarPorTextoDialog(self, prefill_rows=prefill_rows)
@@ -843,6 +876,7 @@ class PresupuestoView(QWidget):
         # Conectar el evento de cambio de celda
         self.table.itemChanged.connect(self.on_cell_changed)
         self.table.cellClicked.connect(self.on_cell_clicked)
+
 
     def on_cell_clicked(self, row, column):
         """Maneja los clics en las celdas, detectando Shift+Click para editar."""

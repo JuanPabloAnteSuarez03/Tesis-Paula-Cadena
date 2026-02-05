@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QCheckBox,
+    QSizePolicy,
 )
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6.QtGui import QCloseEvent
@@ -43,11 +44,28 @@ class _IFCOpenWorker(QThread):
 
 
 class IFCModelViewerDialog(QDialog):
-    def __init__(self, parent=None):
+    loading_finished = pyqtSignal()
+    size_changed = pyqtSignal()
+    def __init__(self, parent=None, embedded: bool = False, show_table: bool = True, show_controls: bool = True):
         super().__init__(parent)
+        self._embedded = embedded
+        self._show_table = show_table
+        self._show_controls = show_controls
+        self._base_size = (1600, 900)
         self.setWindowTitle("Visor IFC - Modelo y Componentes")
-        self.resize(1600, 900)
-        self.setMinimumSize(1600, 900)
+        self.resize(*self._base_size)
+        
+        if embedded:
+            self.setWindowFlags(Qt.WindowType.Widget)
+            self.setModal(False)
+            # Permitir que el visor embebido se ajuste al panel de recursos
+            self.setMinimumSize(0, 0)
+            self.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+            )
+        else:
+            # Ventana normal redimensionable con tamaño mínimo
+            self.setMinimumSize(800, 600)
 
         self.ifc_file = None
         self.settings = ifcopenshell.geom.settings()
@@ -71,10 +89,14 @@ class IFCModelViewerDialog(QDialog):
             "6": 2.235, "7": 3.042, "8": 3.973, "9": 5.060, "10": 6.404,
         }
 
+        self._ifc_path = None
         self._build_ui()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
+        if self._embedded:
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(0)
 
         top = QHBoxLayout()
         self.btn_load = QPushButton("Cargar Modelo IFC")
@@ -88,14 +110,21 @@ class IFCModelViewerDialog(QDialog):
         self.lbl_info = QLabel("Carga el IFC para ver materiales y cantidades...")
         top.addWidget(self.btn_load)
         top.addWidget(self.lbl_info)
-        layout.addLayout(top)
+        if self._show_controls:
+            layout.addLayout(top)
+        else:
+            self.btn_load.setVisible(False)
+            self.lbl_info.setVisible(False)
 
         self.warn_label = QLabel(
             "Aviso: cargar geometría completa en archivos grandes puede tardar bastante. "
             "Si solo necesita la tabla, desactive la geometría."
         )
         self.warn_label.setWordWrap(True)
-        layout.addWidget(self.warn_label)
+        if self._show_controls:
+            layout.addWidget(self.warn_label)
+        else:
+            self.warn_label.setVisible(False)
 
         opt_layout = QHBoxLayout()
         self.chk_load_geometry = QCheckBox("Cargar geometría 3D")
@@ -105,7 +134,11 @@ class IFCModelViewerDialog(QDialog):
         self.chk_fast_preview.setChecked(True)
         opt_layout.addWidget(self.chk_fast_preview)
         opt_layout.addStretch(1)
-        layout.addLayout(opt_layout)
+        if self._show_controls:
+            layout.addLayout(opt_layout)
+        else:
+            self.chk_load_geometry.setVisible(False)
+            self.chk_fast_preview.setVisible(False)
 
         self.progress_widget = QWidget(self)
         prog_layout = QHBoxLayout(self.progress_widget)
@@ -141,15 +174,22 @@ class IFCModelViewerDialog(QDialog):
         )
         self.tree.setAlternatingRowColors(True)
         self.tree.itemClicked.connect(self._on_tree_item_clicked)
-        split.addWidget(self.tree)
+        if self._show_table:
+            split.addWidget(self.tree)
+        else:
+            self.tree.setVisible(False)
 
         frame = QFrame()
         l3d = QVBoxLayout(frame)
+        if self._embedded:
+            l3d.setContentsMargins(0, 0, 0, 0)
+            l3d.setSpacing(0)
         self.plotter = QtInteractor(frame)
         self.plotter.set_background("white")
         l3d.addWidget(self.plotter.interactor)
         split.addWidget(frame)
-        split.setSizes([700, 700])
+        if self._show_table:
+            split.setSizes([700, 700])
 
         btns = QHBoxLayout()
         self.btn_generate = QPushButton("Generar ítems…")
@@ -166,28 +206,147 @@ class IFCModelViewerDialog(QDialog):
         btns.addStretch(1)
         btns.addWidget(self.btn_generate)
         btns.addWidget(self.btn_close)
-        layout.addLayout(btns)
+        if self._show_controls:
+            layout.addLayout(btns)
+        else:
+            self.btn_generate.setVisible(False)
+            self.btn_close.setVisible(False)
 
         self.btn_generate.setEnabled(False)
+        if self._embedded:
+            self.btn_close.setVisible(False)
 
     def _load_ifc(self):
-        ruta, _ = QFileDialog.getOpenFileName(self, "Abrir", "", "IFC (*.ifc)")
+        ruta = self.select_and_load_ifc()
         if not ruta:
             return
 
+    def select_and_load_ifc(self):
+        ruta, _ = QFileDialog.getOpenFileName(self, "Abrir", "", "IFC (*.ifc)")
+        if not ruta:
+            return None
+        self.load_ifc_path(ruta)
+        return ruta
+
+    def load_ifc_model(self, model, ruta=None):
+        if model is None:
+            return
+        if ruta:
+            self._ifc_path = ruta
+        self._reset_view_for_load()
+        self.ifc_file = model
+        self._prepare_processing()
+        self._process_next_chunk()
+    
+    def copy_state_from(self, other_dialog):
+        """Copia el estado completo de otro diálogo (modelo, partidas, geometría) para evitar reprocesar."""
+        if not other_dialog or not hasattr(other_dialog, 'ifc_file') or not other_dialog.ifc_file:
+            print("copy_state_from: diálogo fuente inválido")
+            return False
+        
+        try:
+            # Copiar modelo y ruta
+            self.ifc_file = other_dialog.ifc_file
+            self._ifc_path = getattr(other_dialog, '_ifc_path', None)
+            
+            # Copiar partidas procesadas
+            self._partidas = other_dialog._partidas.copy() if hasattr(other_dialog, '_partidas') and other_dialog._partidas else {}
+            self._total_acero_refuerzo = getattr(other_dialog, '_total_acero_refuerzo', 0.0)
+            
+            # Copiar diccionarios de geometría
+            self.actor_dict = {}
+            self.group_dict = {}
+            
+            # Copiar elementos procesados
+            self._pending_elements = list(getattr(other_dialog, '_pending_elements', []))
+            self._geom_elements = list(getattr(other_dialog, '_geom_elements', []))
+            
+            # Limpiar vista
+            self.plotter.clear()
+            if hasattr(self, 'tree') and self.tree:
+                self.tree.clear()
+            
+            # En modo embebido, cargar geometría de forma lazy desde los elementos ya procesados
+            if self._embedded and self._geom_elements:
+                # Cargar geometría en segundo plano sin mostrar progreso
+                self._geom_index = 0
+                self._cancel_geometry = False
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(100, lambda: self._load_geometry_lazy())
+            
+            # Reconstruir el árbol solo si está visible
+            if hasattr(self, 'tree') and self.tree and self._show_table:
+                # Agregar acero refuerzo
+                if self._total_acero_refuerzo > 0:
+                    item_acero = QTreeWidgetItem(self.tree)
+                    item_acero.setText(0, "ACERO REFUERZO FLEJADO (TOTAL)")
+                    item_acero.setText(1, "Grado 60 / A706")
+                    item_acero.setText(2, f"{self._total_acero_refuerzo:,.2f}")
+                    item_acero.setText(3, "KLS")
+                    item_acero.setText(4, "IfcReinforcingBar")
+                    item_acero.setData(2, Qt.ItemDataRole.UserRole, self._total_acero_refuerzo)
+                    f = item_acero.font(0)
+                    f.setBold(True)
+                    item_acero.setFont(0, f)
+                    item_acero.setBackground(0, Qt.GlobalColor.cyan)
+                
+                # Agregar partidas
+                for clave, datos in sorted(self._partidas.items()):
+                    item = QTreeWidgetItem(self.tree)
+                    item.setText(0, datos["nombre"])
+                    item.setText(1, datos["material"])
+                    item.setText(2, f"{datos['cant']:,.2f}")
+                    item.setText(3, datos["unidad"])
+                    item.setText(4, datos["tipo"])
+                    item.setData(2, Qt.ItemDataRole.UserRole, datos["cant"])
+                    self.group_dict[id(item)] = datos["ids"]
+            
+            self.plotter.reset_camera()
+            if hasattr(self, 'btn_generate'):
+                if self._embedded:
+                    self.btn_generate.setEnabled(False)
+                else:
+                    self.btn_generate.setEnabled(True)
+            
+            if self._show_controls and hasattr(self, 'lbl_info'):
+                self.lbl_info.setText("Modelo cargado desde memoria.")
+            self._hide_progress()
+            
+            print(f"copy_state_from: Estado copiado exitosamente. Partidas: {len(self._partidas)}, Geometría: {len(self.actor_dict)}")
+            return True
+        except Exception as e:
+            import traceback
+            print(f"Error copiando estado: {e}")
+            traceback.print_exc()
+            return False
+
+    def load_ifc_path(self, ruta: str):
+        if not ruta:
+            return
+        self._reset_view_for_load()
+
+        self.btn_load.setEnabled(False)
+        self.btn_generate.setEnabled(False)
+        self._ifc_path = ruta
+        self._worker = _IFCOpenWorker(ruta)
+        self._worker.opened.connect(self._on_ifc_opened)
+        self._worker.failed.connect(self._on_ifc_failed)
+        self._worker.start()
+
+    def _reset_view_for_load(self):
         self._show_progress("Abriendo IFC... (esto puede tardar)")
-        self.lbl_info.setText("Abriendo IFC...")
+        if self._show_controls:
+            self.lbl_info.setText("Abriendo IFC...")
         self.plotter.clear()
         self.tree.clear()
         self.actor_dict = {}
         self.group_dict = {}
 
-        self.btn_load.setEnabled(False)
-        self.btn_generate.setEnabled(False)
-        self._worker = _IFCOpenWorker(ruta)
-        self._worker.opened.connect(self._on_ifc_opened)
-        self._worker.failed.connect(self._on_ifc_failed)
-        self._worker.start()
+    def get_loaded_path(self):
+        return self._ifc_path
+
+    def get_loaded_model(self):
+        return self.ifc_file
 
     def _get_material_name(self, elem):
         material_name = "Sin Definir"
@@ -364,6 +523,7 @@ class IFCModelViewerDialog(QDialog):
             self.btn_generate.setEnabled(True)
             self.btn_load.setToolTip("Ya hay un IFC cargado.")
             self.lbl_info.setText("Modelo cargado (sin geometría).")
+            self.loading_finished.emit()
 
     def _calc_rebar_weight(self, elem):
         props = self._get_properties(elem)
@@ -467,6 +627,35 @@ class IFCModelViewerDialog(QDialog):
                     act.prop.line_width = 2
         self.plotter.render()
 
+    def _load_geometry_lazy(self):
+        """Carga geometría de forma lazy sin mostrar progreso (para modo embebido)."""
+        total = len(self._geom_elements)
+        if self._geom_index >= total:
+            return
+        
+        chunk = 25  # Cargar en chunks pequeños
+        end = min(self._geom_index + chunk, total)
+        for i in range(self._geom_index, end):
+            _tipo, elem = self._geom_elements[i]
+            try:
+                material = self._get_material_name(elem)
+                es_metal = self._is_metal(elem, material)
+                self._create_actor(elem, es_metal=es_metal)
+            except Exception:
+                continue
+        
+        self._geom_index = end
+        if self._geom_index < total:
+            # Continuar cargando en el siguiente chunk
+            QTimer.singleShot(10, self._load_geometry_lazy)
+        else:
+            # Terminado, renderizar
+            try:
+                self.plotter.reset_camera()
+                self.plotter.render()
+            except Exception:
+                pass
+
     def _start_geometry_load(self):
         total = len(self._geom_elements)
         self._show_progress(f"Cargando geometría: 0/{total}", determinate=True, maximum=max(total, 1))
@@ -482,12 +671,14 @@ class IFCModelViewerDialog(QDialog):
             self.btn_generate.setEnabled(True)
             self.btn_load.setToolTip("Ya hay un IFC cargado.")
             self.lbl_info.setText("Geometría detenida por el usuario.")
+            self.loading_finished.emit()
             return
         if self._geom_index >= total:
             self._hide_progress()
             self.btn_generate.setEnabled(True)
             self.btn_load.setToolTip("Ya hay un IFC cargado.")
             self.lbl_info.setText("Modelo cargado.")
+            self.loading_finished.emit()
             return
 
         chunk = 25 if self.chk_fast_preview.isChecked() else 15
@@ -564,6 +755,14 @@ class IFCModelViewerDialog(QDialog):
         except Exception:
             pass
         super().closeEvent(event)
+
+
+    def resizeEvent(self, event):
+        """Maneja el redimensionamiento normal sin efectos secundarios."""
+        super().resizeEvent(event)
+        # Ya no emitimos señal para evitar bugs visuales al redimensionar
+
+
 
     def _show_progress(self, message: str, determinate: bool = False, maximum: int = 0):
         self.progress_label.setText(message)

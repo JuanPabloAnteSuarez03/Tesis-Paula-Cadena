@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QStackedWidget, QSplitter, QSizePolicy, QFrame, QComboBox,
     QLabel, QScrollArea, QGroupBox
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from .presupuesto_view import PresupuestoView
 from .resource_list_view import ResourceListView
 from .analisis_unitarios_view import AnalisisUnitariosView
@@ -105,6 +105,10 @@ class MainWindow(QMainWindow):
             pass
         self.center_stack.addWidget(self.presupuesto_controller.view)
         self.center_stack.setCurrentWidget(self.presupuesto_controller.view)
+        try:
+            self.presupuesto_controller.view.ifc_loaded.connect(self._on_ifc_loaded_from_presupuesto)
+        except Exception:
+            pass
         self.aiu_widget = None
         self.analisis_presupuesto_widget = None
         self._analisis_presupuesto_ctrls = []
@@ -284,10 +288,12 @@ class MainWindow(QMainWindow):
         self.center_panel_layout.addWidget(self.center_stack)
 
     def setup_left_panel(self):
-        """Configura el panel izquierdo para recursos."""
+        """Configura el panel izquierdo con splitter vertical: Recursos arriba, Visor 3D abajo."""
         left_layout = QVBoxLayout(self.left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
         
-        # Título del panel
+        # Título del panel izquierdo
         left_title = QWidget()
         left_title.setMinimumHeight(50)
         left_title.setMaximumHeight(50)
@@ -330,13 +336,101 @@ class MainWindow(QMainWindow):
         # Agregar título al panel
         left_layout.addWidget(left_title)
         
-        # Contenedor para el contenido del panel de recursos
-        self.resources_container = QWidget()
-        left_layout.addWidget(self.resources_container)
-        self.resources_container_layout = QVBoxLayout(self.resources_container)
+        # Splitter vertical principal: Recursos arriba | Visor 3D abajo
+        self.left_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.left_splitter.setChildrenCollapsible(False)
+        self.left_splitter.setHandleWidth(8)
+        self.left_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #bbbbbb;
+                width: 8px;
+                height: 8px;
+            }
+            QSplitter::handle:hover {
+                background-color: #0078d7;
+            }
+            QSplitter::handle:pressed {
+                background-color: #005a9e;
+            }
+        """)
+        left_layout.addWidget(self.left_splitter)
+        
+        # Panel superior: Recursos
+        self.resources_panel = QWidget()
+        self.left_splitter.addWidget(self.resources_panel)
+        
+        # Panel inferior: Visor 3D IFC
+        self.ifc_viewer_panel = QWidget()
+        self.left_splitter.addWidget(self.ifc_viewer_panel)
+        
+        # Configurar proporciones iniciales (60% recursos, 40% visor 3D)
+        self.left_splitter.setStretchFactor(0, 3)
+        self.left_splitter.setStretchFactor(1, 2)
+        
+        # Configurar panel de recursos
+        self.setup_resources_panel()
+        
+        # Configurar panel de visor 3D
+        self.setup_ifc_viewer_panel()
         
         # Cargar controlador de recursos
         self.load_resources()
+    
+    def setup_resources_panel(self):
+        """Configura el panel de recursos dentro del splitter izquierdo."""
+        resources_layout = QVBoxLayout(self.resources_panel)
+        resources_layout.setContentsMargins(0, 0, 0, 0)
+        resources_layout.setSpacing(0)
+        
+        # Contenedor para la vista de recursos
+        self.resources_container = QWidget()
+        resources_layout.addWidget(self.resources_container)
+        self.resources_container_layout = QVBoxLayout(self.resources_container)
+        self.resources_container_layout.setContentsMargins(0, 0, 0, 0)
+    
+    def setup_ifc_viewer_panel(self):
+        """Configura el panel del visor 3D IFC dentro del splitter izquierdo."""
+        ifc_layout = QVBoxLayout(self.ifc_viewer_panel)
+        ifc_layout.setContentsMargins(0, 0, 0, 0)
+        ifc_layout.setSpacing(0)
+        
+        # Título del panel de visor 3D
+        ifc_title = QWidget()
+        ifc_title.setMinimumHeight(50)
+        ifc_title.setMaximumHeight(50)
+        ifc_title.setStyleSheet("background-color: #0078d7; color: white;")
+        
+        title_layout = QHBoxLayout(ifc_title)
+        title_layout.setContentsMargins(10, 5, 10, 5)
+        
+        title_label = QPushButton("Modelo 3D IFC")
+        title_label.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: white;
+                border: none;
+                font-size: 16px;
+                font-weight: bold;
+            }
+        """)
+        title_layout.addWidget(title_label)
+        title_layout.addStretch()
+        
+        ifc_layout.addWidget(ifc_title)
+        
+        # Contenedor para el visor 3D
+        self.ifc_container = QWidget()
+        ifc_layout.addWidget(self.ifc_container)
+        self.ifc_container_layout = QVBoxLayout(self.ifc_container)
+        self.ifc_container_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Placeholder inicial
+        placeholder = QLabel("No hay modelo 3D cargado.\nImporta un archivo IFC para visualizarlo aquí.")
+        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        placeholder.setStyleSheet("color: #666; padding: 20px;")
+        self.ifc_container_layout.addWidget(placeholder)
+        
+        self.ifc_3d_view_left = None
 
     def setup_right_panel(self):
         """Configura el panel derecho para análisis unitarios."""
@@ -407,6 +501,13 @@ class MainWindow(QMainWindow):
             center_width = sizes[1] - (left_width if sizes[0] == 0 else 0)
             right_width = sizes[2]
             self.main_splitter.setSizes([left_width, center_width, right_width])
+        if visible:
+            try:
+                if self.ifc_3d_view_left is not None:
+                    self.ifc_3d_view_left.plotter.reset_camera()
+                    self.ifc_3d_view_left.plotter.render()
+            except Exception:
+                pass
         
     def toggle_right_panel(self):
         """Muestra u oculta el panel derecho de análisis unitarios."""
@@ -424,10 +525,10 @@ class MainWindow(QMainWindow):
             self.main_splitter.setSizes([left_width, center_width, right_width])
     
     def load_resources(self):
-        """Carga el controlador de recursos en el panel izquierdo."""
-        # Limpiar contenedor
+        """Carga el controlador de recursos en el panel de recursos."""
+        # Limpiar contenedor de recursos
         self.clear_layout(self.resources_container_layout)
-        
+
         # Crear controlador de recursos
         self.resource_controller = ResourceController()
         # Si ya existe el controlador de análisis, inyectarlo para refrescos posteriores
@@ -438,6 +539,8 @@ class MainWindow(QMainWindow):
                     self.analisis_controller.set_resource_controller(self.resource_controller)
         except Exception:
             pass
+        
+        # Agregar vista de recursos al contenedor
         self.resources_container_layout.addWidget(self.resource_controller.view)
     
     def load_analysis(self):
@@ -625,6 +728,118 @@ class MainWindow(QMainWindow):
                     self.presupuesto_controller.view.update_row_total(row)
             # refrescar totales generales
             self.presupuesto_controller.view.update_total_presupuesto()
+        except Exception:
+            pass
+
+    # ---------- Visor IFC embebido en panel de recursos ----------
+    def _on_ifc_loaded_from_presupuesto(self, payload):
+        try:
+            ruta = None
+            model = None
+            source_dialog = None
+            if isinstance(payload, dict):
+                ruta = payload.get("path")
+                model = payload.get("model")
+                source_dialog = payload.get("dialog")
+            elif isinstance(payload, str):
+                ruta = payload
+
+            self._ensure_ifc_3d_left_view()
+            try:
+                current_path = self.ifc_3d_view_left.get_loaded_path()
+            except Exception:
+                current_path = None
+            if ruta and current_path and ruta == current_path:
+                return
+
+            # Si hay un diálogo fuente con estado procesado, copiar el estado en lugar de reprocesar
+            if source_dialog and hasattr(source_dialog, 'ifc_file') and source_dialog.ifc_file:
+                print(f"Intentando copiar estado del diálogo fuente...")
+                if self.ifc_3d_view_left.copy_state_from(source_dialog):
+                    # Estado copiado exitosamente, no necesita reprocesar
+                    print("Estado copiado exitosamente, mostrando visor...")
+                    self._show_ifc_3d_left_view()
+                    # Forzar actualización del widget
+                    from PyQt6.QtCore import QTimer
+                    QTimer.singleShot(100, lambda: self.ifc_3d_view_left.plotter.render() if self.ifc_3d_view_left else None)
+                    return
+                else:
+                    print("No se pudo copiar el estado, cargando normalmente...")
+
+            # Si no se pudo copiar el estado, cargar normalmente
+            if model is not None:
+                self.ifc_3d_view_left.load_ifc_model(model, ruta=ruta)
+            elif ruta:
+                self.ifc_3d_view_left.load_ifc_path(ruta)
+            else:
+                return
+            self._show_ifc_3d_left_view()
+        except Exception:
+            pass
+
+    def _ensure_ifc_3d_left_view(self):
+        from views.ifc_model_viewer_dialog import IFCModelViewerDialog
+        if self.ifc_3d_view_left is not None:
+            return
+        
+        # Limpiar contenedor del visor 3D
+        self.clear_layout(self.ifc_container_layout)
+        
+        # Crear visor 3D embebido
+        self.ifc_3d_view_left = IFCModelViewerDialog(
+            self.ifc_viewer_panel, embedded=True, show_table=False, show_controls=False
+        )
+        try:
+            self.ifc_3d_view_left.loading_finished.connect(self._on_ifc_3d_left_loaded)
+        except Exception:
+            pass
+        
+        # Agregar al contenedor del visor 3D
+        self.ifc_container_layout.addWidget(self.ifc_3d_view_left)
+
+    def _show_ifc_3d_left_view(self):
+        try:
+            if self.ifc_3d_view_left is None:
+                self._ensure_ifc_3d_left_view()
+            
+            # Asegurar que el visor 3D esté visible
+            if self.ifc_3d_view_left:
+                self.ifc_3d_view_left.setVisible(True)
+                try:
+                    self.ifc_3d_view_left.plotter.reset_camera()
+                    self.ifc_3d_view_left.plotter.render()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _on_ifc_3d_left_loaded(self):
+        try:
+            # Forzar refresco del panel izquierdo al terminar la carga
+            sizes = self.main_splitter.sizes()
+            self.left_panel.setVisible(False)
+            QTimer.singleShot(50, lambda: self._restore_left_panel_after_ifc(sizes))
+        except Exception:
+            pass
+
+    def _restore_left_panel_after_ifc(self, sizes):
+        try:
+            self.left_panel.setVisible(True)
+            if sizes:
+                self.main_splitter.setSizes(sizes)
+            
+            # Asegurar que el visor 3D esté visible y renderizado
+            self._show_ifc_3d_left_view()
+        except Exception:
+            pass
+    
+    def refresh_left_panel_for_ifc(self, dialog_size=None):
+        """Método público para refrescar el panel izquierdo (usado cuando se cierra el diálogo IFC)."""
+        try:
+            # Mismo efecto que cuando termina de cargar el modelo 3D
+            sizes = self.main_splitter.sizes()
+            self.left_panel.setVisible(False)
+            QTimer.singleShot(50, lambda: self._restore_left_panel_after_ifc(sizes))
         except Exception:
             pass
 
