@@ -1,4 +1,7 @@
 import os
+import random
+import time
+from typing import Optional
 import numpy as np
 from PyQt6.QtWidgets import (
     QDialog,
@@ -73,6 +76,17 @@ class IFCModelViewerDialog(QDialog):
 
         self.actor_dict = {}
         self.group_dict = {}
+        self._mesh_cache = {}
+
+        self._mesh_cache_hits = 0
+        self._mesh_cache_misses = 0
+        self._mesh_cache_stores = 0
+        self._actors_created = 0
+        self._shape_time_total_s = 0.0
+        self._t_processing_start = None
+        self._t_geometry_start = None
+        self._t_ifc_open_start = None
+        self._safe_render_token = 0
 
         self._worker = None
         self._pending_elements = []
@@ -91,6 +105,97 @@ class IFCModelViewerDialog(QDialog):
 
         self._ifc_path = None
         self._build_ui()
+
+    def _log(self, msg: str):
+        try:
+            if os.environ.get('APP_IFC_LOGS', '1') != '1':
+                return
+        except Exception:
+            pass
+        try:
+            mode = 'EMBED' if getattr(self, '_embedded', False) else 'DIALOG'
+            show_table = 'T' if getattr(self, '_show_table', False) else 'F'
+            show_ctrl = 'T' if getattr(self, '_show_controls', False) else 'F'
+            path = getattr(self, '_ifc_path', None)
+            p = os.path.basename(path) if path else 'NOFILE'
+            print(f"[IFC:{mode} tbl={show_table} ctrl={show_ctrl} file={p}] {msg}")
+        except Exception:
+            pass
+
+    def _render_target_ready(self) -> bool:
+        try:
+            if not hasattr(self, 'plotter') or self.plotter is None:
+                return False
+            w = int(self.plotter.interactor.width())
+            h = int(self.plotter.interactor.height())
+            if w <= 10 or h <= 10:
+                return False
+            if not self.plotter.interactor.isVisible():
+                return False
+            return True
+        except Exception:
+            return False
+
+    def _safe_render_deferred(self, reset_camera: bool = False, tag: str = "render", attempt: int = 0, token: Optional[int] = None):
+        try:
+            if token is None:
+                self._safe_render_token += 1
+                token = self._safe_render_token
+            if token != self._safe_render_token:
+                return
+        except Exception:
+            pass
+
+        if attempt >= 30:
+            try:
+                self._log(f"{tag}: giveup (not ready)")
+            except Exception:
+                pass
+            return
+
+        if not self._render_target_ready():
+            QTimer.singleShot(100, lambda: self._safe_render_deferred(reset_camera=reset_camera, tag=tag, attempt=attempt + 1, token=token))
+            return
+
+        try:
+            if reset_camera:
+                self.plotter.reset_camera()
+            self.plotter.render()
+        except Exception as e:
+            try:
+                self._log(f"{tag}: render failed: {e}")
+            except Exception:
+                pass
+
+    def request_render(self, reset_camera: bool = False, tag: str = "request_render"):
+        try:
+            self._safe_render_deferred(reset_camera=reset_camera, tag=tag)
+        except Exception:
+            pass
+
+    def _apply_render_quality_deferred(self, attempt: int = 0):
+        try:
+            if os.environ.get('APP_IFC_EDL', '0') != '1':
+                return
+        except Exception:
+            return
+
+        try:
+            if getattr(self, '_embedded', False):
+                return
+        except Exception:
+            return
+
+        if attempt >= 30:
+            return
+        if not self._render_target_ready():
+            QTimer.singleShot(100, lambda: self._apply_render_quality_deferred(attempt + 1))
+            return
+        try:
+            if hasattr(self, 'chk_fast_preview') and (not self.chk_fast_preview.isChecked()):
+                self.plotter.enable_eye_dome_lighting()
+        except Exception:
+            pass
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -174,6 +279,8 @@ class IFCModelViewerDialog(QDialog):
         )
         self.tree.setAlternatingRowColors(True)
         self.tree.itemClicked.connect(self._on_tree_item_clicked)
+        # Install event filter to detect clicks on empty space
+        self.tree.viewport().installEventFilter(self)
         if self._show_table:
             split.addWidget(self.tree)
         else:
@@ -186,7 +293,11 @@ class IFCModelViewerDialog(QDialog):
             l3d.setSpacing(0)
         self.plotter = QtInteractor(frame)
         self.plotter.set_background("white")
+        if not self.chk_fast_preview.isChecked():
+            self._apply_render_quality_deferred()
         l3d.addWidget(self.plotter.interactor)
+        # Install event filter on plotter to detect clicks outside table
+        self.plotter.interactor.installEventFilter(self)
         split.addWidget(frame)
         if self._show_table:
             split.setSizes([700, 700])
@@ -215,6 +326,9 @@ class IFCModelViewerDialog(QDialog):
         self.btn_generate.setEnabled(False)
         if self._embedded:
             self.btn_close.setVisible(False)
+        
+        # Install event filter on dialog itself to detect clicks on background
+        self.installEventFilter(self)
 
     def _load_ifc(self):
         ruta = self.select_and_load_ifc()
@@ -245,6 +359,7 @@ class IFCModelViewerDialog(QDialog):
             return False
         
         try:
+            t0 = time.perf_counter()
             # Copiar modelo y ruta
             self.ifc_file = other_dialog.ifc_file
             self._ifc_path = getattr(other_dialog, '_ifc_path', None)
@@ -260,19 +375,56 @@ class IFCModelViewerDialog(QDialog):
             # Copiar elementos procesados
             self._pending_elements = list(getattr(other_dialog, '_pending_elements', []))
             self._geom_elements = list(getattr(other_dialog, '_geom_elements', []))
+
+            try:
+                other_cache = getattr(other_dialog, '_mesh_cache', None)
+                if isinstance(other_cache, dict) and other_cache:
+                    self._mesh_cache = other_cache.copy()
+                else:
+                    self._mesh_cache = {}
+            except Exception:
+                self._mesh_cache = {}
+
+            # Sincronizar configuración visual (evita que el embebido use "vista rápida" por defecto)
+            try:
+                if hasattr(self, 'chk_fast_preview') and hasattr(other_dialog, 'chk_fast_preview'):
+                    self.chk_fast_preview.setChecked(bool(other_dialog.chk_fast_preview.isChecked()))
+                if hasattr(self, 'chk_load_geometry') and hasattr(other_dialog, 'chk_load_geometry'):
+                    self.chk_load_geometry.setChecked(bool(other_dialog.chk_load_geometry.isChecked()))
+
+                self._apply_render_quality_deferred()
+            except Exception:
+                pass
+
+            try:
+                self._mesh_cache_hits = 0
+                self._mesh_cache_misses = 0
+                self._mesh_cache_stores = 0
+                self._actors_created = 0
+                self._shape_time_total_s = 0.0
+            except Exception:
+                pass
+            
+            # Copiar group_dict si existe (para interacción con el árbol)
+            if hasattr(other_dialog, 'group_dict') and other_dialog.group_dict:
+                # Necesitamos reconstruir el group_dict después de crear los items del árbol
+                # Por ahora lo copiamos temporalmente
+                self._temp_group_dict = other_dialog.group_dict.copy()
             
             # Limpiar vista
             self.plotter.clear()
             if hasattr(self, 'tree') and self.tree:
                 self.tree.clear()
             
-            # En modo embebido, cargar geometría de forma lazy desde los elementos ya procesados
+            # En modo embebido, recrear geometría desde elementos ya procesados (más rápido que procesar desde cero)
             if self._embedded and self._geom_elements:
-                # Cargar geometría en segundo plano sin mostrar progreso
+                # Cargar geometría de forma rápida desde elementos ya identificados
+                print(f"copy_state_from: Recreando geometría desde {len(self._geom_elements)} elementos ya procesados...")
                 self._geom_index = 0
                 self._cancel_geometry = False
+                # Cargar en chunks pequeños para mantener UI responsive
                 from PyQt6.QtCore import QTimer
-                QTimer.singleShot(100, lambda: self._load_geometry_lazy())
+                QTimer.singleShot(50, self._load_geometry_fast)
             
             # Reconstruir el árbol solo si está visible
             if hasattr(self, 'tree') and self.tree and self._show_table:
@@ -301,7 +453,6 @@ class IFCModelViewerDialog(QDialog):
                     item.setData(2, Qt.ItemDataRole.UserRole, datos["cant"])
                     self.group_dict[id(item)] = datos["ids"]
             
-            self.plotter.reset_camera()
             if hasattr(self, 'btn_generate'):
                 if self._embedded:
                     self.btn_generate.setEnabled(False)
@@ -312,7 +463,21 @@ class IFCModelViewerDialog(QDialog):
                 self.lbl_info.setText("Modelo cargado desde memoria.")
             self._hide_progress()
             
-            print(f"copy_state_from: Estado copiado exitosamente. Partidas: {len(self._partidas)}, Geometría: {len(self.actor_dict)}")
+            print(f"copy_state_from: Estado copiado exitosamente. Partidas: {len(self._partidas)}, Elementos para geometría: {len(self._geom_elements)}")
+
+            try:
+                dt = time.perf_counter() - t0
+                self._log(
+                    f"copy_state_from OK in {dt:.3f}s | cache_entries={len(self._mesh_cache)} | geom_elems={len(self._geom_elements)}"
+                )
+            except Exception:
+                pass
+            
+            # Si hay elementos para cargar geometría, se cargarán de forma asíncrona
+            # Si no hay elementos, renderizar inmediatamente
+            if not self._geom_elements or len(self._geom_elements) == 0:
+                self._safe_render_deferred(reset_camera=True, tag="copy_state_no_geom")
+            
             return True
         except Exception as e:
             import traceback
@@ -328,6 +493,11 @@ class IFCModelViewerDialog(QDialog):
         self.btn_load.setEnabled(False)
         self.btn_generate.setEnabled(False)
         self._ifc_path = ruta
+        try:
+            self._t_ifc_open_start = time.perf_counter()
+            self._log("load_ifc_path: starting async open")
+        except Exception:
+            pass
         self._worker = _IFCOpenWorker(ruta)
         self._worker.opened.connect(self._on_ifc_opened)
         self._worker.failed.connect(self._on_ifc_failed)
@@ -341,6 +511,19 @@ class IFCModelViewerDialog(QDialog):
         self.tree.clear()
         self.actor_dict = {}
         self.group_dict = {}
+        self._mesh_cache = {}
+
+        try:
+            self._mesh_cache_hits = 0
+            self._mesh_cache_misses = 0
+            self._mesh_cache_stores = 0
+            self._actors_created = 0
+            self._shape_time_total_s = 0.0
+            self._t_processing_start = time.perf_counter()
+            self._t_geometry_start = None
+            self._log("reset_view_for_load")
+        except Exception:
+            pass
 
     def get_loaded_path(self):
         return self._ifc_path
@@ -381,6 +564,12 @@ class IFCModelViewerDialog(QDialog):
 
     def _on_ifc_opened(self, model):
         self.ifc_file = model
+        try:
+            if self._t_ifc_open_start:
+                dt = time.perf_counter() - self._t_ifc_open_start
+                self._log(f"IFC opened OK in {dt:.3f}s")
+        except Exception:
+            pass
         self._prepare_processing()
         self._process_next_chunk()
 
@@ -422,6 +611,13 @@ class IFCModelViewerDialog(QDialog):
             self._geom_elements = geom_list
         else:
             self._geom_elements = list(self._pending_elements)
+
+        try:
+            self._log(
+                f"prepare_processing: pending={len(self._pending_elements)} geom={len(self._geom_elements)} fast_preview={bool(self.chk_fast_preview.isChecked())}"
+            )
+        except Exception:
+            pass
 
     def _process_next_chunk(self):
         total = len(self._pending_elements)
@@ -583,8 +779,83 @@ class IFCModelViewerDialog(QDialog):
         return data
 
     def _create_actor(self, elem, es_metal=False):
+        guid = None
         try:
+            guid = getattr(elem, 'GlobalId', None)
+        except Exception:
+            guid = None
+
+        try:
+            if guid and isinstance(getattr(self, '_mesh_cache', None), dict) and guid in self._mesh_cache:
+                cached = self._mesh_cache.get(guid) or {}
+                verts = cached.get('verts', None)
+                faces_pv = cached.get('faces_pv', None)
+                if verts is not None and faces_pv is not None:
+                    try:
+                        self._mesh_cache_hits += 1
+                        self._actors_created += 1
+                    except Exception:
+                        pass
+                    mesh = pv.PolyData(verts, faces_pv)
+
+                    use_high_quality = not self.chk_fast_preview.isChecked()
+
+                    if use_high_quality:
+                        tono_gris = random.uniform(0.85, 0.98)
+                        color = [tono_gris, tono_gris, tono_gris]
+                    else:
+                        color = "#A0A0A0"
+                        cached_metal = cached.get('es_metal', es_metal)
+                        if cached_metal:
+                            color = "#4682B4"
+                        else:
+                            try:
+                                if elem.is_a("IfcFooting"):
+                                    color = "#8B4513"
+                                elif elem.is_a("IfcSlab"):
+                                    color = "#DCDCDC"
+                            except Exception:
+                                pass
+
+                    try:
+                        actor = self.plotter.add_mesh(
+                            mesh,
+                            color=color,
+                            show_edges=use_high_quality,
+                            smooth_shading=use_high_quality,
+                            line_width=1 if use_high_quality else 0.0,
+                            pbr=False,
+                            lighting=True,
+                            render=False,
+                        )
+                    except TypeError:
+                        actor = self.plotter.add_mesh(
+                            mesh,
+                            color=color,
+                            show_edges=use_high_quality,
+                            smooth_shading=use_high_quality,
+                            line_width=1 if use_high_quality else 0.0,
+                            pbr=False,
+                            lighting=True,
+                        )
+                    actor._original_color = color
+                    self.actor_dict[guid] = actor
+                    return
+        except Exception:
+            pass
+
+        try:
+            try:
+                self._mesh_cache_misses += 1
+            except Exception:
+                pass
+
+            t_shape = time.perf_counter()
             shape = ifcopenshell.geom.create_shape(self.settings, elem)
+            try:
+                self._shape_time_total_s += (time.perf_counter() - t_shape)
+            except Exception:
+                pass
             geom = shape.geometry
             verts = np.array(geom.verts).reshape(-1, 3)
             faces = np.array(geom.faces).reshape(-1, 3)
@@ -593,22 +864,61 @@ class IFCModelViewerDialog(QDialog):
             ).astype(np.int64)
             mesh = pv.PolyData(verts, faces_pv)
 
-            color = "#A0A0A0"
-            if es_metal:
-                color = "#4682B4"
-            elif elem.is_a("IfcFooting"):
-                color = "#8B4513"
-            elif elem.is_a("IfcSlab"):
-                color = "#DCDCDC"
+            use_high_quality = not self.chk_fast_preview.isChecked()
 
-            actor = self.plotter.add_mesh(
-                mesh,
-                color=color,
-                show_edges=False,
-                smooth_shading=False,
-                line_width=0.0,
-            )
-            self.actor_dict[elem.GlobalId] = actor
+            if use_high_quality:
+                tono_gris = random.uniform(0.85, 0.98)
+                color = [tono_gris, tono_gris, tono_gris]
+            else:
+                color = "#A0A0A0"
+                if es_metal:
+                    color = "#4682B4"
+                elif elem.is_a("IfcFooting"):
+                    color = "#8B4513"
+                elif elem.is_a("IfcSlab"):
+                    color = "#DCDCDC"
+
+            try:
+                actor = self.plotter.add_mesh(
+                    mesh,
+                    color=color,
+                    show_edges=use_high_quality,
+                    smooth_shading=use_high_quality,
+                    line_width=1 if use_high_quality else 0.0,
+                    pbr=False,
+                    lighting=True,
+                    render=False,
+                )
+            except TypeError:
+                actor = self.plotter.add_mesh(
+                    mesh,
+                    color=color,
+                    show_edges=use_high_quality,
+                    smooth_shading=use_high_quality,
+                    line_width=1 if use_high_quality else 0.0,
+                    pbr=False,
+                    lighting=True,
+                )
+            actor._original_color = color
+            if guid:
+                self.actor_dict[guid] = actor
+                try:
+                    self._actors_created += 1
+                except Exception:
+                    pass
+                try:
+                    if isinstance(getattr(self, '_mesh_cache', None), dict):
+                        self._mesh_cache[guid] = {
+                            'verts': verts,
+                            'faces_pv': faces_pv,
+                            'es_metal': bool(es_metal),
+                        }
+                        try:
+                            self._mesh_cache_stores += 1
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -626,6 +936,20 @@ class IFCModelViewerDialog(QDialog):
                     act.prop.color = "#FF8C00"
                     act.prop.line_width = 2
         self.plotter.render()
+
+    def reset_visualization(self):
+        """Reset all actors to their original state (color and opacity)."""
+        for actor in self.actor_dict.values():
+            # Restore original color if stored
+            if hasattr(actor, '_original_color'):
+                actor.prop.color = actor._original_color
+            else:
+                actor.prop.color = "#A0A0A0"  # fallback
+            actor.prop.opacity = 1.0
+            actor.prop.line_width = 0.0
+        self.plotter.render()
+        # Clear tree selection
+        self.tree.clearSelection()
 
     def _load_geometry_lazy(self):
         """Carga geometría de forma lazy sin mostrar progreso (para modo embebido)."""
@@ -655,6 +979,71 @@ class IFCModelViewerDialog(QDialog):
                 self.plotter.render()
             except Exception:
                 pass
+    
+    def _load_geometry_fast(self):
+        """Carga geometría rápidamente desde elementos ya procesados (sin progreso, modo embebido)."""
+        total = len(self._geom_elements)
+        if self._cancel_geometry:
+            return
+        
+        if self._geom_index >= total:
+            # Terminado, renderizar
+            try:
+                self._safe_render_deferred(reset_camera=True, tag="geometry_fast_done")
+                print(f"_load_geometry_fast: Geometría cargada completamente ({len(self.actor_dict)} actores)")
+                try:
+                    dt = 0.0
+                    if self._t_geometry_start is not None:
+                        dt = time.perf_counter() - self._t_geometry_start
+                    self._log(
+                        f"geometry_fast DONE in {dt:.3f}s | actors={len(self.actor_dict)} | hits={self._mesh_cache_hits} misses={self._mesh_cache_misses} stores={self._mesh_cache_stores} shape_time={self._shape_time_total_s:.3f}s"
+                    )
+                except Exception:
+                    pass
+            except Exception as e:
+                print(f"Error renderizando: {e}")
+            return
+        
+        # Cargar en chunks más grandes para velocidad
+        chunk = 50
+        end = min(self._geom_index + chunk, total)
+        if self._geom_index == 0:
+            try:
+                self._t_geometry_start = time.perf_counter()
+                self._log(f"geometry_fast START total={total}")
+            except Exception:
+                pass
+        for i in range(self._geom_index, end):
+            _tipo, elem = self._geom_elements[i]
+            try:
+                material = self._get_material_name(elem)
+                es_metal = self._is_metal(elem, material)
+                self._create_actor(elem, es_metal=es_metal)
+            except Exception as e:
+                print(f"Error creando actor para {elem.GlobalId}: {e}")
+                continue
+        
+        self._geom_index = end
+        
+        # Continuar cargando en el siguiente chunk
+        if self._geom_index < total:
+            QTimer.singleShot(5, self._load_geometry_fast)
+        else:
+            # Terminado, renderizar
+            try:
+                self._safe_render_deferred(reset_camera=True, tag="geometry_fast_done")
+                print(f"_load_geometry_fast: Geometría cargada completamente ({len(self.actor_dict)} actores)")
+                try:
+                    dt = 0.0
+                    if self._t_geometry_start is not None:
+                        dt = time.perf_counter() - self._t_geometry_start
+                    self._log(
+                        f"geometry_fast DONE in {dt:.3f}s | actors={len(self.actor_dict)} | hits={self._mesh_cache_hits} misses={self._mesh_cache_misses} stores={self._mesh_cache_stores} shape_time={self._shape_time_total_s:.3f}s"
+                    )
+                except Exception:
+                    pass
+            except Exception as e:
+                print(f"Error renderizando: {e}")
 
     def _start_geometry_load(self):
         total = len(self._geom_elements)
@@ -662,6 +1051,11 @@ class IFCModelViewerDialog(QDialog):
         self._geom_index = 0
         self._cancel_geometry = False
         self.btn_cancel_geom.setEnabled(True)
+        try:
+            self._t_geometry_start = time.perf_counter()
+            self._log(f"geometry_full START total={total}")
+        except Exception:
+            pass
         QTimer.singleShot(0, self._process_geometry_chunk)
 
     def _process_geometry_chunk(self):
@@ -678,6 +1072,15 @@ class IFCModelViewerDialog(QDialog):
             self.btn_generate.setEnabled(True)
             self.btn_load.setToolTip("Ya hay un IFC cargado.")
             self.lbl_info.setText("Modelo cargado.")
+            try:
+                dt = 0.0
+                if self._t_geometry_start is not None:
+                    dt = time.perf_counter() - self._t_geometry_start
+                self._log(
+                    f"geometry_full DONE in {dt:.3f}s | actors={len(self.actor_dict)} | hits={self._mesh_cache_hits} misses={self._mesh_cache_misses} stores={self._mesh_cache_stores} shape_time={self._shape_time_total_s:.3f}s"
+                )
+            except Exception:
+                pass
             self.loading_finished.emit()
             return
 
@@ -748,6 +1151,29 @@ class IFCModelViewerDialog(QDialog):
                 dlg.exec()
         except Exception as exc:
             QMessageBox.critical(self, "Error", f"No se pudo abrir Importar por Texto:\n{exc}")
+
+
+    def eventFilter(self, obj, event):
+        """Filter events to detect clicks on empty space or outside the table."""
+        if event.type() == event.Type.MouseButtonPress:
+            # Check if click is on tree viewport empty space
+            if obj == self.tree.viewport():
+                item = self.tree.itemAt(event.pos())
+                # If no item was clicked (empty space), reset visualization
+                # Only reset if there's actually a selection to clear (avoid unnecessary rendering)
+                if not item and self.tree.selectedItems():
+                    self.reset_visualization()
+            # Check if click is on the 3D viewer (plotter)
+            elif obj == self.plotter.interactor:
+                # Any click on the 3D viewer should deselect
+                if self.tree.selectedItems():
+                    self.reset_visualization()
+            # Check if click is on the dialog background (gray area)
+            elif obj == self:
+                # Any click on the dialog background should deselect
+                if self.tree.selectedItems():
+                    self.reset_visualization()
+        return super().eventFilter(obj, event)
 
     def closeEvent(self, event: QCloseEvent):
         try:

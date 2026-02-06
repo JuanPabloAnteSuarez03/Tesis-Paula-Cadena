@@ -759,9 +759,9 @@ class MainWindow(QMainWindow):
                     # Estado copiado exitosamente, no necesita reprocesar
                     print("Estado copiado exitosamente, mostrando visor...")
                     self._show_ifc_3d_left_view()
-                    # Forzar actualización del widget
+                    # Render seguro (evita errores OpenGL si el widget aún no tiene tamaño)
                     from PyQt6.QtCore import QTimer
-                    QTimer.singleShot(100, lambda: self.ifc_3d_view_left.plotter.render() if self.ifc_3d_view_left else None)
+                    QTimer.singleShot(100, lambda: self.ifc_3d_view_left.request_render(reset_camera=True, tag="main_copy_state") if self.ifc_3d_view_left else None)
                     return
                 else:
                     print("No se pudo copiar el estado, cargando normalmente...")
@@ -806,8 +806,7 @@ class MainWindow(QMainWindow):
             if self.ifc_3d_view_left:
                 self.ifc_3d_view_left.setVisible(True)
                 try:
-                    self.ifc_3d_view_left.plotter.reset_camera()
-                    self.ifc_3d_view_left.plotter.render()
+                    self.ifc_3d_view_left.request_render(reset_camera=True, tag="main_show_left")
                 except Exception:
                     pass
         except Exception:
