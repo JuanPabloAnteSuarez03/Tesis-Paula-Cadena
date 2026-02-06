@@ -24,12 +24,14 @@ class PresupuestoView(QWidget):
     analisis_selected = pyqtSignal(str)
     analysis_edit_requested = pyqtSignal(str)
     ifc_loaded = pyqtSignal(object)
+    ifc_highlight_requested = pyqtSignal(object)
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Presupuesto")
         self.resize(1000, 600)
         self.layout = QVBoxLayout(self)
+        self._last_ifc_highlight_payload = None
         self.chapter_counter = 0
         self.admin_cost_total = 0.0
         self.direct_cost_total = 0.0
@@ -319,6 +321,32 @@ class PresupuestoView(QWidget):
 
     def open_ifc_materials_dialog(self):
         try:
+            widget = self.parent()
+            max_depth = 10
+            depth = 0
+            while widget is not None and depth < max_depth:
+                class_name = widget.__class__.__name__
+                if class_name == 'MainWindow':
+                    try:
+                        if hasattr(widget, '_embedded_ifc_has_model') and widget._embedded_ifc_has_model():
+                            QMessageBox.information(
+                                self,
+                                "Modelo ya cargado",
+                                "Ya hay un modelo IFC cargado en el visor de abajo a la izquierda. Elimínalo para cargar otro.",
+                            )
+                            return
+                    except Exception:
+                        pass
+                    break
+                try:
+                    widget = widget.parent()
+                except Exception:
+                    break
+                depth += 1
+        except Exception:
+            pass
+
+        try:
             from .ifc_model_viewer_dialog import IFCModelViewerDialog
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo cargar el visor IFC:\n{e}")
@@ -376,6 +404,7 @@ class PresupuestoView(QWidget):
                     desc = (entry.get('descripcion') or '').strip()
                     und = (entry.get('unidad') or '').strip()
                     cantidad = entry.get('cantidad') or 1.0
+                    ifc_guids = entry.get('ifc_guids', None)
 
                     if not desc:
                         continue
@@ -404,6 +433,11 @@ class PresupuestoView(QWidget):
                     # Columna 1: descripción
                     desc_item = QTableWidgetItem(desc)
                     desc_item.setToolTip(desc)
+                    try:
+                        if ifc_guids:
+                            desc_item.setData(Qt.ItemDataRole.UserRole, ifc_guids)
+                    except Exception:
+                        pass
                     self.table.setItem(row_idx, 1, desc_item)
 
                     # Columna 2: unidad
@@ -876,6 +910,60 @@ class PresupuestoView(QWidget):
         # Conectar el evento de cambio de celda
         self.table.itemChanged.connect(self.on_cell_changed)
         self.table.cellClicked.connect(self.on_cell_clicked)
+        try:
+            self.table.itemSelectionChanged.connect(self._on_budget_selection_changed)
+        except Exception:
+            pass
+
+    def _on_budget_selection_changed(self):
+        try:
+            items = self.table.selectedItems()
+            if not items:
+                if self._last_ifc_highlight_payload is not None:
+                    self._last_ifc_highlight_payload = None
+                    self.ifc_highlight_requested.emit([])
+                return
+
+            row = items[0].row()
+            code_item = self.table.item(row, 0)
+            if not code_item:
+                if self._last_ifc_highlight_payload is not None:
+                    self._last_ifc_highlight_payload = None
+                    self.ifc_highlight_requested.emit([])
+                return
+            role = code_item.data(Qt.ItemDataRole.UserRole)
+            if role in ['chapter', 'subtotal']:
+                if self._last_ifc_highlight_payload is not None:
+                    self._last_ifc_highlight_payload = None
+                    self.ifc_highlight_requested.emit([])
+                return
+
+            desc_item = self.table.item(row, 1)
+            guids = None
+            if desc_item is not None:
+                guids = desc_item.data(Qt.ItemDataRole.UserRole)
+            if not guids:
+                if self._last_ifc_highlight_payload is not None:
+                    self._last_ifc_highlight_payload = None
+                    self.ifc_highlight_requested.emit([])
+                return
+
+            try:
+                payload = tuple(guids) if isinstance(guids, (list, tuple)) else guids
+            except Exception:
+                payload = guids
+
+            if payload == self._last_ifc_highlight_payload:
+                return
+            self._last_ifc_highlight_payload = payload
+            self.ifc_highlight_requested.emit(guids)
+        except Exception:
+            try:
+                if self._last_ifc_highlight_payload is not None:
+                    self._last_ifc_highlight_payload = None
+                    self.ifc_highlight_requested.emit([])
+            except Exception:
+                pass
 
 
     def on_cell_clicked(self, row, column):

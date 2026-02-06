@@ -3,7 +3,7 @@ import sys
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, 
     QPushButton, QStackedWidget, QSplitter, QSizePolicy, QFrame, QComboBox,
-    QLabel, QScrollArea, QGroupBox
+    QLabel, QScrollArea, QGroupBox, QAbstractButton
 )
 from PyQt6.QtCore import Qt, QTimer
 from .presupuesto_view import PresupuestoView
@@ -25,6 +25,85 @@ class MainWindow(QMainWindow):
         # Aplicar un estilo global a toda la aplicación
         
         self.init_ui()
+
+        try:
+            app = QApplication.instance()
+            if app is not None:
+                app.installEventFilter(self)
+        except Exception:
+            pass
+
+    def _is_descendant_of(self, w: QWidget, parent: QWidget) -> bool:
+        try:
+            cur = w
+            max_depth = 50
+            depth = 0
+            while cur is not None and depth < max_depth:
+                if cur == parent:
+                    return True
+                cur = cur.parent()
+                depth += 1
+        except Exception:
+            return False
+        return False
+
+    def eventFilter(self, obj, event):
+        try:
+            if event.type() == event.Type.MouseButtonPress:
+                try:
+                    if self.center_stack.currentWidget() != self.presupuesto_controller.view:
+                        return super().eventFilter(obj, event)
+                except Exception:
+                    return super().eventFilter(obj, event)
+
+                view = getattr(self, 'presupuesto_controller', None)
+                view = getattr(view, 'view', None)
+                table = getattr(view, 'table', None)
+                if table is None:
+                    return super().eventFilter(obj, event)
+
+                w = obj if isinstance(obj, QWidget) else None
+                if w is None:
+                    return super().eventFilter(obj, event)
+
+                if isinstance(w, QAbstractButton):
+                    return super().eventFilter(obj, event)
+                try:
+                    cur = w
+                    max_depth = 20
+                    depth = 0
+                    while cur is not None and depth < max_depth:
+                        if isinstance(cur, QAbstractButton):
+                            return super().eventFilter(obj, event)
+                        cur = cur.parent()
+                        depth += 1
+                except Exception:
+                    pass
+
+                if self._is_descendant_of(w, table):
+                    return super().eventFilter(obj, event)
+                try:
+                    header = table.horizontalHeader()
+                    if header is not None and self._is_descendant_of(w, header):
+                        return super().eventFilter(obj, event)
+                except Exception:
+                    pass
+                try:
+                    vheader = table.verticalHeader()
+                    if vheader is not None and self._is_descendant_of(w, vheader):
+                        return super().eventFilter(obj, event)
+                except Exception:
+                    pass
+
+                try:
+                    if table.selectedItems():
+                        table.clearSelection()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        return super().eventFilter(obj, event)
 
 
     def init_ui(self):
@@ -107,6 +186,10 @@ class MainWindow(QMainWindow):
         self.center_stack.setCurrentWidget(self.presupuesto_controller.view)
         try:
             self.presupuesto_controller.view.ifc_loaded.connect(self._on_ifc_loaded_from_presupuesto)
+        except Exception:
+            pass
+        try:
+            self.presupuesto_controller.view.ifc_highlight_requested.connect(self._on_ifc_highlight_requested)
         except Exception:
             pass
         self.aiu_widget = None
@@ -415,6 +498,16 @@ class MainWindow(QMainWindow):
         """)
         title_layout.addWidget(title_label)
         title_layout.addStretch()
+
+        self.btn_ifc_delete_left = QPushButton("Eliminar")
+        self.btn_ifc_delete_left.setStyleSheet(
+            "QPushButton { background-color: #B00020; color: white; border: none; padding: 5px 10px; font-weight: bold; } "
+            "QPushButton:hover { background-color: #7A0016; border-radius: 4px; } "
+            "QPushButton:disabled { background-color: #999999; }"
+        )
+        self.btn_ifc_delete_left.setEnabled(False)
+        self.btn_ifc_delete_left.clicked.connect(self._on_ifc_delete_left_clicked)
+        title_layout.addWidget(self.btn_ifc_delete_left)
         
         ifc_layout.addWidget(ifc_title)
         
@@ -423,14 +516,95 @@ class MainWindow(QMainWindow):
         ifc_layout.addWidget(self.ifc_container)
         self.ifc_container_layout = QVBoxLayout(self.ifc_container)
         self.ifc_container_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Placeholder inicial
-        placeholder = QLabel("No hay modelo 3D cargado.\nImporta un archivo IFC para visualizarlo aquí.")
-        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        placeholder.setStyleSheet("color: #666; padding: 20px;")
-        self.ifc_container_layout.addWidget(placeholder)
+
+        self._reset_ifc_left_to_placeholder()
         
         self.ifc_3d_view_left = None
+        self._pending_ifc_highlight_guids = None
+
+    def _reset_ifc_left_to_placeholder(self):
+        try:
+            self.clear_layout(self.ifc_container_layout)
+        except Exception:
+            pass
+
+        try:
+            placeholder = QLabel("No hay modelo 3D cargado.\nImporta un archivo IFC para visualizarlo aquí.")
+            placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            placeholder.setStyleSheet("color: #666; padding: 20px;")
+            self.ifc_container_layout.addWidget(placeholder)
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, 'ifc_container') and self.ifc_container is not None:
+                self.ifc_container.update()
+        except Exception:
+            pass
+
+    def _embedded_ifc_has_model(self) -> bool:
+        try:
+            if self.ifc_3d_view_left is None:
+                return False
+            if hasattr(self.ifc_3d_view_left, '_has_loaded_model'):
+                return bool(self.ifc_3d_view_left._has_loaded_model())
+            return bool(getattr(self.ifc_3d_view_left, 'ifc_file', None)) or bool(getattr(self.ifc_3d_view_left, 'actor_dict', None))
+        except Exception:
+            return False
+
+    def _update_ifc_delete_left_state(self):
+        try:
+            if hasattr(self, 'btn_ifc_delete_left') and self.btn_ifc_delete_left is not None:
+                self.btn_ifc_delete_left.setEnabled(bool(self._embedded_ifc_has_model()))
+        except Exception:
+            pass
+
+    def _on_ifc_delete_left_clicked(self):
+        try:
+            try:
+                if self.ifc_3d_view_left is not None:
+                    try:
+                        if hasattr(self, 'ifc_container_layout') and self.ifc_container_layout is not None:
+                            self.ifc_container_layout.removeWidget(self.ifc_3d_view_left)
+                    except Exception:
+                        pass
+                    try:
+                        self.ifc_3d_view_left.unload_model()
+                    except Exception:
+                        pass
+                    try:
+                        if hasattr(self.ifc_3d_view_left, 'plotter') and self.ifc_3d_view_left.plotter is not None:
+                            self.ifc_3d_view_left.plotter.close()
+                    except Exception:
+                        pass
+                    try:
+                        self.ifc_3d_view_left.setVisible(False)
+                        self.ifc_3d_view_left.setParent(None)
+                    except Exception:
+                        pass
+                    try:
+                        self.ifc_3d_view_left.deleteLater()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            try:
+                self.ifc_3d_view_left = None
+            except Exception:
+                pass
+            try:
+                self._pending_ifc_highlight_guids = None
+            except Exception:
+                pass
+
+            try:
+                self._reset_ifc_left_to_placeholder()
+            except Exception:
+                pass
+            self._update_ifc_delete_left_state()
+        except Exception:
+            pass
 
     def setup_right_panel(self):
         """Configura el panel derecho para análisis unitarios."""
@@ -759,9 +933,25 @@ class MainWindow(QMainWindow):
                     # Estado copiado exitosamente, no necesita reprocesar
                     print("Estado copiado exitosamente, mostrando visor...")
                     self._show_ifc_3d_left_view()
-                    # Render seguro (evita errores OpenGL si el widget aún no tiene tamaño)
+
                     from PyQt6.QtCore import QTimer
-                    QTimer.singleShot(100, lambda: self.ifc_3d_view_left.request_render(reset_camera=True, tag="main_copy_state") if self.ifc_3d_view_left else None)
+                    QTimer.singleShot(
+                        100,
+                        lambda: self.ifc_3d_view_left.request_render(reset_camera=True, tag="main_copy_state")
+                        if self.ifc_3d_view_left
+                        else None,
+                    )
+
+                    try:
+                        if self._pending_ifc_highlight_guids is not None:
+                            self.ifc_3d_view_left.highlight_guids(self._pending_ifc_highlight_guids)
+                    except Exception:
+                        pass
+
+                    try:
+                        self._update_ifc_delete_left_state()
+                    except Exception:
+                        pass
                     return
                 else:
                     print("No se pudo copiar el estado, cargando normalmente...")
@@ -774,6 +964,31 @@ class MainWindow(QMainWindow):
             else:
                 return
             self._show_ifc_3d_left_view()
+
+            try:
+                if self._pending_ifc_highlight_guids is not None and self.ifc_3d_view_left is not None:
+                    self.ifc_3d_view_left.highlight_guids(self._pending_ifc_highlight_guids)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _on_ifc_highlight_requested(self, guids):
+        try:
+            self._pending_ifc_highlight_guids = guids
+
+            if self.ifc_3d_view_left is None:
+                return
+            if not guids:
+                try:
+                    self.ifc_3d_view_left.clear_highlight()
+                except Exception:
+                    pass
+                return
+            try:
+                self.ifc_3d_view_left.highlight_guids(guids)
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -797,6 +1012,11 @@ class MainWindow(QMainWindow):
         # Agregar al contenedor del visor 3D
         self.ifc_container_layout.addWidget(self.ifc_3d_view_left)
 
+        try:
+            self._update_ifc_delete_left_state()
+        except Exception:
+            pass
+
     def _show_ifc_3d_left_view(self):
         try:
             if self.ifc_3d_view_left is None:
@@ -814,6 +1034,10 @@ class MainWindow(QMainWindow):
 
     def _on_ifc_3d_left_loaded(self):
         try:
+            try:
+                self._update_ifc_delete_left_state()
+            except Exception:
+                pass
             # Forzar refresco del panel izquierdo al terminar la carga
             sizes = self.main_splitter.sizes()
             self.left_panel.setVisible(False)
@@ -841,8 +1065,6 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(50, lambda: self._restore_left_panel_after_ifc(sizes))
         except Exception:
             pass
-
-            layout.addStretch(1)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

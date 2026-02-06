@@ -87,6 +87,7 @@ class IFCModelViewerDialog(QDialog):
         self._t_geometry_start = None
         self._t_ifc_open_start = None
         self._safe_render_token = 0
+        self._pending_highlight_guids = None
 
         self._worker = None
         self._pending_elements = []
@@ -105,6 +106,95 @@ class IFCModelViewerDialog(QDialog):
 
         self._ifc_path = None
         self._build_ui()
+
+    def _has_loaded_model(self) -> bool:
+        try:
+            return bool(self.ifc_file) or bool(self._ifc_path) or bool(self.actor_dict)
+        except Exception:
+            return False
+
+    def unload_model(self):
+        try:
+            try:
+                self._cancel_geometry = True
+            except Exception:
+                pass
+
+            try:
+                self._pending_highlight_guids = None
+            except Exception:
+                pass
+
+            try:
+                self.ifc_file = None
+            except Exception:
+                pass
+            try:
+                self._ifc_path = None
+            except Exception:
+                pass
+
+            try:
+                self._worker = None
+            except Exception:
+                pass
+
+            try:
+                self._pending_elements = []
+                self._pending_index = 0
+                self._geom_index = 0
+                self._geom_elements = []
+                self._partidas = {}
+                self._total_acero_refuerzo = 0.0
+            except Exception:
+                pass
+
+            try:
+                self.actor_dict = {}
+                self.group_dict = {}
+                self._mesh_cache = {}
+            except Exception:
+                pass
+
+            try:
+                if hasattr(self, 'plotter') and self.plotter is not None:
+                    self.plotter.clear()
+                    try:
+                        self.plotter.set_background("white")
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            try:
+                if hasattr(self, 'tree') and self.tree is not None:
+                    self.tree.clear()
+            except Exception:
+                pass
+
+            try:
+                self._hide_progress()
+            except Exception:
+                pass
+
+            try:
+                if hasattr(self, 'btn_generate'):
+                    self.btn_generate.setEnabled(False)
+                if hasattr(self, 'btn_load'):
+                    self.btn_load.setEnabled(True)
+                    self.btn_load.setToolTip("")
+                if hasattr(self, 'btn_delete'):
+                    self.btn_delete.setEnabled(False)
+                if hasattr(self, 'lbl_info') and self._show_controls:
+                    self.lbl_info.setText("Carga el IFC para ver materiales y cantidades...")
+            except Exception:
+                pass
+
+            try:
+                self.request_render(reset_camera=True, tag="unload_model")
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     def _log(self, msg: str):
         try:
@@ -173,6 +263,73 @@ class IFCModelViewerDialog(QDialog):
         except Exception:
             pass
 
+    def clear_highlight(self):
+        try:
+            self.reset_visualization()
+        except Exception:
+            pass
+
+    def highlight_guids(self, guids):
+        try:
+            if not guids:
+                self.reset_visualization()
+                return
+
+            if isinstance(guids, str):
+                gids = [guids]
+            else:
+                try:
+                    gids = list(guids)
+                except Exception:
+                    gids = []
+
+            if not gids:
+                self.reset_visualization()
+                return
+
+            # If geometry hasn't been mounted yet, defer highlighting
+            try:
+                if not self.actor_dict:
+                    self._pending_highlight_guids = gids
+                    return
+            except Exception:
+                pass
+
+            targets = []
+            for guid in gids:
+                try:
+                    act = self.actor_dict.get(guid)
+                    if act is not None:
+                        targets.append(act)
+                except Exception:
+                    continue
+            if not targets:
+                self.reset_visualization()
+                return
+
+            for actor in self.actor_dict.values():
+                try:
+                    actor.prop.opacity = 1.0
+                    actor.prop.color = "#D3D3D3"
+                    actor.prop.line_width = 1
+                except Exception:
+                    pass
+
+            for guid in gids:
+                try:
+                    act = self.actor_dict.get(guid)
+                    if act is None:
+                        continue
+                    act.prop.opacity = 1.0
+                    act.prop.color = "#FF8C00"
+                    act.prop.line_width = 3
+                except Exception:
+                    continue
+
+            self.request_render(reset_camera=False, tag="highlight_guids")
+        except Exception:
+            pass
+
     def _apply_render_quality_deferred(self, attempt: int = 0):
         try:
             if os.environ.get('APP_IFC_EDL', '0') != '1':
@@ -212,13 +369,24 @@ class IFCModelViewerDialog(QDialog):
             "QPushButton:hover { background-color: #005A9E; }"
         )
         self.btn_load.clicked.connect(self._load_ifc)
+        self.btn_delete = QPushButton("Eliminar")
+        self.btn_delete.setStyleSheet(
+            "QPushButton { "
+            "background-color: #B00020; color: white; font-weight: bold; "
+            "padding: 10px; border-radius: 4px; } "
+            "QPushButton:hover { background-color: #7A0016; }"
+        )
+        self.btn_delete.clicked.connect(self.unload_model)
+        self.btn_delete.setEnabled(False)
         self.lbl_info = QLabel("Carga el IFC para ver materiales y cantidades...")
         top.addWidget(self.btn_load)
+        top.addWidget(self.btn_delete)
         top.addWidget(self.lbl_info)
         if self._show_controls:
             layout.addLayout(top)
         else:
             self.btn_load.setVisible(False)
+            self.btn_delete.setVisible(False)
             self.lbl_info.setVisible(False)
 
         self.warn_label = QLabel(
@@ -331,6 +499,13 @@ class IFCModelViewerDialog(QDialog):
         self.installEventFilter(self)
 
     def _load_ifc(self):
+        try:
+            if self._has_loaded_model():
+                QMessageBox.information(self, "Modelo ya cargado", "Ya hay un modelo IFC cargado. Elimina el modelo actual para cargar otro.")
+                return
+        except Exception:
+            pass
+
         ruta = self.select_and_load_ifc()
         if not ruta:
             return
@@ -413,6 +588,10 @@ class IFCModelViewerDialog(QDialog):
             
             # Limpiar vista
             self.plotter.clear()
+            try:
+                self.plotter.set_background("white")
+            except Exception:
+                pass
             if hasattr(self, 'tree') and self.tree:
                 self.tree.clear()
             
@@ -458,6 +637,14 @@ class IFCModelViewerDialog(QDialog):
                     self.btn_generate.setEnabled(False)
                 else:
                     self.btn_generate.setEnabled(True)
+
+            try:
+                if hasattr(self, 'btn_load'):
+                    self.btn_load.setToolTip("Ya hay un IFC cargado.")
+                if hasattr(self, 'btn_delete') and (not self._embedded):
+                    self.btn_delete.setEnabled(True)
+            except Exception:
+                pass
             
             if self._show_controls and hasattr(self, 'lbl_info'):
                 self.lbl_info.setText("Modelo cargado desde memoria.")
@@ -492,6 +679,10 @@ class IFCModelViewerDialog(QDialog):
 
         self.btn_load.setEnabled(False)
         self.btn_generate.setEnabled(False)
+        try:
+            self.btn_delete.setEnabled(False)
+        except Exception:
+            pass
         self._ifc_path = ruta
         try:
             self._t_ifc_open_start = time.perf_counter()
@@ -507,7 +698,15 @@ class IFCModelViewerDialog(QDialog):
         self._show_progress("Abriendo IFC... (esto puede tardar)")
         if self._show_controls:
             self.lbl_info.setText("Abriendo IFC...")
+        try:
+            self.btn_delete.setEnabled(False)
+        except Exception:
+            pass
         self.plotter.clear()
+        try:
+            self.plotter.set_background("white")
+        except Exception:
+            pass
         self.tree.clear()
         self.actor_dict = {}
         self.group_dict = {}
@@ -579,6 +778,10 @@ class IFCModelViewerDialog(QDialog):
         self.lbl_info.setText("Error al cargar el IFC.")
         self.btn_load.setEnabled(True)
         self.btn_generate.setEnabled(False)
+        try:
+            self.btn_delete.setEnabled(bool(self._has_loaded_model()))
+        except Exception:
+            pass
 
     def _prepare_processing(self):
         self._pending_elements = []
@@ -719,6 +922,10 @@ class IFCModelViewerDialog(QDialog):
             self.btn_generate.setEnabled(True)
             self.btn_load.setToolTip("Ya hay un IFC cargado.")
             self.lbl_info.setText("Modelo cargado (sin geometría).")
+            try:
+                self.btn_delete.setEnabled(True)
+            except Exception:
+                pass
             self.loading_finished.emit()
 
     def _calc_rebar_weight(self, elem):
@@ -923,19 +1130,11 @@ class IFCModelViewerDialog(QDialog):
             pass
 
     def _on_tree_item_clicked(self, item, _col):
-        for actor in self.actor_dict.values():
-            actor.prop.opacity = 0.1
-            actor.prop.color = "#D3D3D3"
-
-        identificador = id(item)
-        if identificador in self.group_dict:
-            for guid in self.group_dict[identificador]:
-                if guid in self.actor_dict:
-                    act = self.actor_dict[guid]
-                    act.prop.opacity = 1.0
-                    act.prop.color = "#FF8C00"
-                    act.prop.line_width = 2
-        self.plotter.render()
+        try:
+            identificador = id(item)
+            self.highlight_guids(self.group_dict.get(identificador, []))
+        except Exception:
+            pass
 
     def reset_visualization(self):
         """Reset all actors to their original state (color and opacity)."""
@@ -946,8 +1145,8 @@ class IFCModelViewerDialog(QDialog):
             else:
                 actor.prop.color = "#A0A0A0"  # fallback
             actor.prop.opacity = 1.0
-            actor.prop.line_width = 0.0
-        self.plotter.render()
+            actor.prop.line_width = 1
+        self.request_render(reset_camera=False, tag="reset_visualization")
         # Clear tree selection
         self.tree.clearSelection()
 
@@ -992,6 +1191,13 @@ class IFCModelViewerDialog(QDialog):
                 self._safe_render_deferred(reset_camera=True, tag="geometry_fast_done")
                 print(f"_load_geometry_fast: Geometría cargada completamente ({len(self.actor_dict)} actores)")
                 try:
+                    if self._pending_highlight_guids:
+                        gids = self._pending_highlight_guids
+                        self._pending_highlight_guids = None
+                        self.highlight_guids(gids)
+                except Exception:
+                    pass
+                try:
                     dt = 0.0
                     if self._t_geometry_start is not None:
                         dt = time.perf_counter() - self._t_geometry_start
@@ -1034,6 +1240,13 @@ class IFCModelViewerDialog(QDialog):
                 self._safe_render_deferred(reset_camera=True, tag="geometry_fast_done")
                 print(f"_load_geometry_fast: Geometría cargada completamente ({len(self.actor_dict)} actores)")
                 try:
+                    if self._pending_highlight_guids:
+                        gids = self._pending_highlight_guids
+                        self._pending_highlight_guids = None
+                        self.highlight_guids(gids)
+                except Exception:
+                    pass
+                try:
                     dt = 0.0
                     if self._t_geometry_start is not None:
                         dt = time.perf_counter() - self._t_geometry_start
@@ -1065,6 +1278,10 @@ class IFCModelViewerDialog(QDialog):
             self.btn_generate.setEnabled(True)
             self.btn_load.setToolTip("Ya hay un IFC cargado.")
             self.lbl_info.setText("Geometría detenida por el usuario.")
+            try:
+                self.btn_delete.setEnabled(True)
+            except Exception:
+                pass
             self.loading_finished.emit()
             return
         if self._geom_index >= total:
@@ -1072,6 +1289,10 @@ class IFCModelViewerDialog(QDialog):
             self.btn_generate.setEnabled(True)
             self.btn_load.setToolTip("Ya hay un IFC cargado.")
             self.lbl_info.setText("Modelo cargado.")
+            try:
+                self.btn_delete.setEnabled(True)
+            except Exception:
+                pass
             try:
                 dt = 0.0
                 if self._t_geometry_start is not None:
@@ -1127,12 +1348,17 @@ class IFCModelViewerDialog(QDialog):
             desc = nombre
             if material:
                 desc = f"{nombre} - {material}"
+            try:
+                ifc_guids = self.group_dict.get(id(item), [])
+            except Exception:
+                ifc_guids = []
             prefill_rows.append(
                 {
                     "item": "",
                     "descripcion": desc,
                     "unidad": unidad,
                     "cantidad": round(cantidad, 3),
+                    "ifc_guids": ifc_guids,
                 }
             )
             total_items += 1

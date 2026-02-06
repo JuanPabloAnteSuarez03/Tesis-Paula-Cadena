@@ -110,6 +110,7 @@ class ImportarPorTextoDialog(QDialog):
                     item = str(r.get('item', '') or '')
                     desc = str(r.get('descripcion', '') or '')
                     und = str(r.get('unidad', '') or '')
+                    ifc_guids = r.get('ifc_guids', None)
                     cant = r.get('cantidad', '')
                     if isinstance(cant, float):
                         # normalize decimal with dot
@@ -123,6 +124,11 @@ class ImportarPorTextoDialog(QDialog):
                             qitem.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
                         if c_idx == 1 and value:
                             qitem.setToolTip(value)
+                            try:
+                                if ifc_guids:
+                                    qitem.setData(Qt.ItemDataRole.UserRole, ifc_guids)
+                            except Exception:
+                                pass
                         self.table.setItem(r_idx, c_idx, qitem)
         except Exception:
             # Do not fail dialog if prefill has issues
@@ -271,6 +277,13 @@ class ImportarPorTextoDialog(QDialog):
             cant_text = self._text(r, 3)
             if not desc:
                 continue
+            ifc_guids = None
+            try:
+                it_desc = self.table.item(r, 1)
+                if it_desc is not None:
+                    ifc_guids = it_desc.data(Qt.ItemDataRole.UserRole)
+            except Exception:
+                ifc_guids = None
             try:
                 cantidad = float(cant_text.replace(',', '.')) if cant_text else 1.0
             except Exception:
@@ -280,6 +293,7 @@ class ImportarPorTextoDialog(QDialog):
                 'descripcion': desc,
                 'unidad': und,
                 'cantidad': cantidad,
+                'ifc_guids': ifc_guids,
             })
         return results
 
