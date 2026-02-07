@@ -96,6 +96,40 @@ class MainWindow(QMainWindow):
                     pass
 
                 try:
+                    # NO deseleccionar si:
+                    # 1. Hay un diálogo modal abierto
+                    # 2. Estamos importando desde un diálogo (flag temporal)
+                    view = getattr(self, 'presupuesto_controller', None)
+                    view = getattr(view, 'view', None)
+                    if view and getattr(view, '_importing_from_dialog', False):
+                        return super().eventFilter(obj, event)
+                    # 2. El widget clickeado es parte de un diálogo (puede estar a punto de abrirse)
+                    # 3. Se está abriendo un diálogo de importación (flag _opening_import_dialog)
+                    from PyQt6.QtWidgets import QApplication, QDialog
+                    
+                    # Verificar si se está abriendo un diálogo de importación
+                    view = getattr(self, 'presupuesto_controller', None)
+                    view = getattr(view, 'view', None)
+                    if view and getattr(view, '_opening_import_dialog', False):
+                        # Se está abriendo un diálogo de importación, no deseleccionar
+                        return super().eventFilter(obj, event)
+                    
+                    active_modal = QApplication.activeModalWidget()
+                    if active_modal is not None:
+                        # Hay un diálogo modal abierto, no deseleccionar
+                        return super().eventFilter(obj, event)
+                    
+                    # Verificar si el widget clickeado o alguno de sus padres es un diálogo
+                    cur = w
+                    max_depth = 20
+                    depth = 0
+                    while cur is not None and depth < max_depth:
+                        if isinstance(cur, QDialog):
+                            # El clic es en un diálogo, no deseleccionar
+                            return super().eventFilter(obj, event)
+                        cur = cur.parent()
+                        depth += 1
+                    
                     if table.selectedItems():
                         table.clearSelection()
                 except Exception:
@@ -446,15 +480,22 @@ class MainWindow(QMainWindow):
         self.ifc_viewer_panel = QWidget()
         self.left_splitter.addWidget(self.ifc_viewer_panel)
         
-        # Configurar proporciones iniciales (60% recursos, 40% visor 3D)
-        self.left_splitter.setStretchFactor(0, 3)
-        self.left_splitter.setStretchFactor(1, 2)
+        # Configurar proporciones iniciales (100% recursos, 0% visor 3D al inicio)
+        self.left_splitter.setStretchFactor(0, 1)
+        self.left_splitter.setStretchFactor(1, 0)
         
         # Configurar panel de recursos
         self.setup_resources_panel()
         
         # Configurar panel de visor 3D
         self.setup_ifc_viewer_panel()
+
+        # Al inicio, ocultar completamente el panel IFC (no solo 0% de tamaño)
+        try:
+            if hasattr(self, 'ifc_viewer_panel') and self.ifc_viewer_panel is not None:
+                self.ifc_viewer_panel.setVisible(False)
+        except Exception:
+            pass
         
         # Cargar controlador de recursos
         self.load_resources()
@@ -597,20 +638,44 @@ class MainWindow(QMainWindow):
                 self._pending_ifc_highlight_guids = None
             except Exception:
                 pass
-
             try:
                 self._reset_ifc_left_to_placeholder()
             except Exception:
                 pass
-            self._update_ifc_delete_left_state()
+            try:
+                self._update_ifc_delete_left_state()
+            except Exception:
+                pass
+            # Al eliminar, volver a 100% recursos, 0% visor 3D
+            try:
+                self.left_splitter.setStretchFactor(0, 1)
+                self.left_splitter.setStretchFactor(1, 0)
+            except Exception:
+                pass
+
+            # Y ocultar por completo el panel IFC
+            try:
+                if hasattr(self, 'ifc_viewer_panel') and self.ifc_viewer_panel is not None:
+                    self.ifc_viewer_panel.setVisible(False)
+                try:
+                    sizes = self.left_splitter.sizes()
+                    total = sum(sizes) if sizes else 0
+                    if total > 0:
+                        self.left_splitter.setSizes([total, 0])
+                except Exception:
+                    pass
+            except Exception:
+                pass
         except Exception:
             pass
 
     def setup_right_panel(self):
         """Configura el panel derecho para análisis unitarios."""
         right_layout = QVBoxLayout(self.right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
         
-        # Título del panel
+        # Título del panel derecho
         right_title = QWidget()
         right_title.setMinimumHeight(50)
         right_title.setMaximumHeight(50)
@@ -630,8 +695,8 @@ class MainWindow(QMainWindow):
             }
         """)
         
-        right_title_layout.addStretch()
         right_title_layout.addWidget(title_label)
+        right_title_layout.addStretch()
         
         close_btn = QPushButton("✕")
         close_btn.setStyleSheet("""
@@ -919,6 +984,14 @@ class MainWindow(QMainWindow):
                 ruta = payload
 
             self._ensure_ifc_3d_left_view()
+        
+            # Mostrar el panel IFC inmediatamente al iniciar la carga
+            try:
+                if hasattr(self, 'ifc_viewer_panel') and self.ifc_viewer_panel is not None:
+                    self.ifc_viewer_panel.setVisible(True)
+            except Exception:
+                pass
+        
             try:
                 current_path = self.ifc_3d_view_left.get_loaded_path()
             except Exception:
@@ -1025,6 +1098,12 @@ class MainWindow(QMainWindow):
             # Asegurar que el visor 3D esté visible
             if self.ifc_3d_view_left:
                 self.ifc_3d_view_left.setVisible(True)
+                # También asegurar que el panel completo sea visible
+                try:
+                    if hasattr(self, 'ifc_viewer_panel') and self.ifc_viewer_panel is not None:
+                        self.ifc_viewer_panel.setVisible(True)
+                except Exception:
+                    pass
                 try:
                     self.ifc_3d_view_left.request_render(reset_camera=True, tag="main_show_left")
                 except Exception:
@@ -1036,6 +1115,23 @@ class MainWindow(QMainWindow):
         try:
             try:
                 self._update_ifc_delete_left_state()
+            except Exception:
+                pass
+            # Al cargar modelo, mostrar el panel IFC y repartir espacio 50/50
+            try:
+                if hasattr(self, 'ifc_viewer_panel') and self.ifc_viewer_panel is not None:
+                    self.ifc_viewer_panel.setVisible(True)
+            except Exception:
+                pass
+
+            try:
+                self.left_splitter.setStretchFactor(0, 1)
+                self.left_splitter.setStretchFactor(1, 1)
+                sizes = self.left_splitter.sizes()
+                total = sum(sizes) if sizes else 0
+                if total > 0:
+                    half = max(1, total // 2)
+                    self.left_splitter.setSizes([half, total - half])
             except Exception:
                 pass
             # Forzar refresco del panel izquierdo al terminar la carga

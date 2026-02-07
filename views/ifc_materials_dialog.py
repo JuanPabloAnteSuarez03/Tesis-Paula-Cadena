@@ -121,27 +121,29 @@ class IFCMaterialsDialog(QDialog):
     def _generate_items_from_ifc(self):
         """
         Consolida los datos actuales y abre 'Importar por Texto' prellenado:
-        - ACERO: un ítem único con el total de Kg del proyecto (código 08-08-11 en la descripción).
-        - CONCRETO: un ítem por cada 'Tipo' único (limpiando el sufijo numérico), cantidad en m3.
+        - Siempre agrega una fila con item = "1".
+        - ACERO: se agrega directamente al presupuesto con el total de Kg del proyecto.
         """
+
         # 1) Total de acero (Kg)
         total_kg = 0.0
         try:
             for r in range(self.rebar_table.rowCount()):
-                # Omitir fila de total del proyecto si existe
                 c0 = self.rebar_table.item(r, 0)
                 if c0 and str(c0.text()).upper().startswith("TOTAL KILOS"):
                     continue
+
                 c_kg = self.rebar_table.item(r, 7)  # Peso total por elemento Kg
                 if not c_kg:
                     continue
-                txt = c_kg.text().strip()
+
                 try:
-                    total_kg += float(txt.replace(',', '.'))
+                    total_kg += float(c_kg.text().strip().replace(',', '.'))
                 except Exception:
                     continue
-            # Fallback: si sigue en 0, intentar leer la fila de total del proyecto
-            if (not total_kg) or total_kg <= 0:
+
+            # Fallback: leer fila TOTAL KILOS si existe
+            if total_kg <= 0:
                 for r in range(self.rebar_table.rowCount()):
                     c0 = self.rebar_table.item(r, 0)
                     if c0 and str(c0.text()).upper().startswith("TOTAL KILOS"):
@@ -155,36 +157,7 @@ class IFCMaterialsDialog(QDialog):
         except Exception:
             total_kg = 0.0
 
-        # 2) Concretos por tipo único (m3)
-        import re
-        def clean_type(s: str) -> str:
-            s = str(s or "")
-            m = re.match(r'^(.*?):\s*\d+\s*$', s)
-            if m:
-                return m.group(1)
-            return re.sub(r':\s*\d+\s*$', '', s)
-
-        vol_by_type = {}
-        try:
-            for r in range(self.concrete_table.rowCount()):
-                t_item = self.concrete_table.item(r, 1)  # Tipo
-                v_item = self.concrete_table.item(r, 4)  # Volumen (m3)
-                ttxt = t_item.text().strip() if t_item else ""
-                if not ttxt or ttxt.upper().startswith("TOTAL"):
-                    continue
-                ctype = clean_type(ttxt)
-                vtxt = v_item.text().strip() if v_item else ""
-                try:
-                    v = float(vtxt.replace(',', '.'))
-                except Exception:
-                    continue
-                vol_by_type[ctype] = vol_by_type.get(ctype, 0.0) + v
-        except Exception:
-            vol_by_type = {}
-
-        # 3) Preparar filas para Importar por Texto
-        prefill_rows = []
-        # Agregar acero directo al presupuesto (no en búsqueda por texto)
+        # 2) Agregar acero directamente al presupuesto
         try:
             parent = self.parent()
             if total_kg > 0 and hasattr(parent, 'add_ifc_rebar_analysis'):
@@ -192,27 +165,15 @@ class IFCMaterialsDialog(QDialog):
         except Exception:
             pass
 
-        if vol_by_type:
-            prefill_rows.append({'item': '1', 'descripcion': 'CONCRETO (IFC)', 'unidad': '', 'cantidad': ''})
-            idx = 1
-            for key in sorted(vol_by_type.keys()):
-                prefill_rows.append({
-                    'item': f"1.{idx}",
-                    'descripcion': key,
-                    'unidad': 'M3',
-                    'cantidad': round(vol_by_type[key], 3),
-                })
-                idx += 1
+        # 3) Preparar UNA sola fila para Importar por Texto
+        prefill_rows = [{
+            'item': '1',  # <-- ESTE ERA EL PROBLEMA: debe ser '1', no ''
+            'descripcion': '',
+            'unidad': '',
+            'cantidad': ''
+        }]
 
-        # Si no hay concreto por importar, terminar aquí
-        if not prefill_rows:
-            if total_kg > 0:
-                QMessageBox.information(self, "Agregado", "Se agregó el ítem de ACERO DE REFUERZO al presupuesto.")
-            else:
-                QMessageBox.information(self, "Sin datos", "No hay datos de concreto o acero para enviar.")
-            return
-
-        # 4) Abrir Importar por Texto del padre (Presupuesto) con datos prellenados
+        # 4) Abrir Importar por Texto
         try:
             parent = self.parent()
             if hasattr(parent, "open_import_text_dialog"):
@@ -223,6 +184,7 @@ class IFCMaterialsDialog(QDialog):
                 dlg.exec()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo abrir Importar por Texto:\n{e}")
+
 
     def _populate_from_model(self, ifc):
         self.concrete_table.setRowCount(0)

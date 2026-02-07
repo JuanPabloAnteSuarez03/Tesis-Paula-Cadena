@@ -103,36 +103,73 @@ class ImportarPorTextoDialog(QDialog):
         # Prefill optional rows (list of dicts with keys: item, descripcion, unidad, cantidad)
         try:
             if prefill_rows:
-                rows = list(prefill_rows)
-                needed = max(20, len(rows))
+                # Crear una copia profunda para evitar modificar los datos originales
+                rows = [dict(row) for row in prefill_rows]
+                print(f"DEBUG_DIALOG: rows después de copia profunda: {rows}")
+
+                # ¿Ya existe un ITEM = "1"?
+                has_root = (
+                    rows and str(rows[0].get("item", "")).strip() == "1"
+                )
+
+                extra = 0 if has_root else 1
+                needed = max(20, len(rows) + extra)
                 self.table.setRowCount(needed)
-                for r_idx, r in enumerate(rows):
-                    item = str(r.get('item', '') or '')
+
+                start_row = 0
+
+                # 1️⃣ CREAR ENCABEZADO SOLO SI NO EXISTE
+                if not has_root:
+                    item_header = QTableWidgetItem("1")
+                    item_header.setTextAlignment(
+                        Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight
+                    )
+                    item_header.setFlags(
+                        Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
+                    )
+                    self.table.setItem(0, 0, item_header)
+
+                    for c in range(1, 4):
+                        self.table.setItem(0, c, QTableWidgetItem(""))
+
+                    start_row = 1
+
+                # 2️⃣ INSERTAR FILAS REALES
+                for r_idx, r in enumerate(rows, start=start_row):
+                    item_value = r.get('item')
+                    item = str(item_value).strip() if item_value is not None and item_value != '' else ''  # <-- CORRECCIÓN: verificar explícitamente
                     desc = str(r.get('descripcion', '') or '')
                     und = str(r.get('unidad', '') or '')
                     ifc_guids = r.get('ifc_guids', None)
                     cant = r.get('cantidad', '')
+
+                    print(f"DEBUG_DIALOG: Procesando fila - item='{item}', desc='{desc}', und='{und}', cant='{cant}'")
+
                     if isinstance(cant, float):
-                        # normalize decimal with dot
                         cant = f"{cant}"
                     else:
                         cant = str(cant or '')
+
                     col_values = [item, desc, und, cant]
+
                     for c_idx, value in enumerate(col_values):
                         qitem = QTableWidgetItem(value)
+
                         if c_idx in (0, 3):
-                            qitem.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
-                        if c_idx == 1 and value:
+                            qitem.setTextAlignment(
+                                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight
+                            )
+
+                        if c_idx == 1:
                             qitem.setToolTip(value)
-                            try:
-                                if ifc_guids:
-                                    qitem.setData(Qt.ItemDataRole.UserRole, ifc_guids)
-                            except Exception:
-                                pass
+                            if ifc_guids:
+                                qitem.setData(Qt.ItemDataRole.UserRole, ifc_guids)
+
                         self.table.setItem(r_idx, c_idx, qitem)
+
         except Exception:
-            # Do not fail dialog if prefill has issues
             pass
+
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -275,7 +312,8 @@ class ImportarPorTextoDialog(QDialog):
             desc = self._text(r, 1)
             und = self._text(r, 2)
             cant_text = self._text(r, 3)
-            if not desc:
+            # Solo saltar si no hay descripción Y no hay item (capítulo sin descripción no es válido)
+            if not desc and not item:
                 continue
             ifc_guids = None
             try:

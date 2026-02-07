@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
-    QPushButton, QHeaderView, QSizePolicy
+    QPushButton, QHeaderView, QSizePolicy, QMessageBox
 )
 from PyQt6.QtCore import Qt
 from sqlalchemy import func
@@ -58,15 +58,18 @@ class AnalisisMatchDialog(QDialog):
         actions = QHBoxLayout()
         actions.addStretch(1)
         self.btn_accept = QPushButton("Usar seleccionado")
+        self.btn_manual = QPushButton("🔍 Buscar manualmente")
         self.btn_stop = QPushButton("Detener proceso")
         self.btn_cancel = QPushButton("Siguiente análisis")
         actions.addWidget(self.btn_accept)
+        actions.addWidget(self.btn_manual)
         actions.addWidget(self.btn_stop)
         actions.addWidget(self.btn_cancel)
         layout.addLayout(actions)
 
         self._aborted = False
         self.btn_accept.clicked.connect(self._on_accept)
+        self.btn_manual.clicked.connect(self._on_manual_search)
         self.btn_stop.clicked.connect(self._on_abort_all)
         self.btn_cancel.clicked.connect(self.reject)
         self.table.cellDoubleClicked.connect(lambda r, c: self._on_accept())
@@ -119,6 +122,21 @@ class AnalisisMatchDialog(QDialog):
         # Marca interrupción global para el proceso de búsqueda por texto
         self._aborted = True
         self.reject()
+
+    def _on_manual_search(self):
+        """Abrir un diálogo independiente para buscar manualmente un análisis unitario."""
+        try:
+            # Crear y mostrar el diálogo independiente de búsqueda
+            from .simple_analisis_selector_dialog import SimpleAnalisisSelectorDialog
+            dlg = SimpleAnalisisSelectorDialog(self)
+            if dlg.exec():
+                sel = dlg.selected_analysis()
+                if sel:
+                    self._selected = sel
+                    self.accept()
+                # Si no seleccionó nada, simplemente continuará al siguiente análisis
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error al abrir búsqueda manual:\n{e}")
 
     def _text(self, row, col):
         it = self.table.item(row, col)

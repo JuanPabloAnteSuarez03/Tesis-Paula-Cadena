@@ -359,3 +359,38 @@ class AnalisisUnitariosView(QWidget):
         if codigo_item:
             codigo = codigo_item.text()
             self.analysis_selected.emit(codigo)
+
+    def get_analysis_data(self, codigo: str):
+        """
+        Obtiene los datos completos de un análisis por su código.
+        Devuelve un diccionario con código, descripción, unidad y costo_unitario.
+        """
+        for row in range(self.table.rowCount()):
+            code_item = self.table.item(row, 0)
+            if code_item and code_item.text() == codigo:
+                # Obtener los datos de las columnas
+                desc_item = self.table.item(row, 1)
+                und_item = self.table.item(row, 2)
+                cu_item = self.table.item(row, 3)
+                
+                return {
+                    'codigo': codigo,
+                    'descripcion': desc_item.text() if desc_item else '',
+                    'unidad': und_item.text() if und_item else '',
+                    'costo_unitario': self._parse_costo_unitario(cu_item.text() if cu_item else '0')
+                }
+        return None
+
+    def _parse_costo_unitario(self, texto):
+        """Parsea el texto del costo unitario a float."""
+        try:
+            # Quitar símbolos de moneda y comas
+            clean = texto.replace('$', '').replace(',', '').strip()
+            return float(clean) if clean else 0.0
+        except Exception:
+            return 0.0
+
+    def refresh_data(self):
+        """Refresca los datos de la tabla (método placeholder para compatibilidad)."""
+        # Este método puede ser implementado para recargar los datos si es necesario
+        pass

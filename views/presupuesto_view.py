@@ -32,6 +32,7 @@ class PresupuestoView(QWidget):
         self.resize(1000, 600)
         self.layout = QVBoxLayout(self)
         self._last_ifc_highlight_payload = None
+        self._last_selected_row = None  # Guardar la última fila seleccionada para importación
         self.chapter_counter = 0
         self.admin_cost_total = 0.0
         self.direct_cost_total = 0.0
@@ -386,12 +387,60 @@ class PresupuestoView(QWidget):
         except Exception:
             pass
 
-    def open_import_text_dialog(self, prefill_rows=None, append: bool = False):
+    def open_import_text_dialog(self, prefill_rows=None, append: bool = False, ifc_dialog=None):
+        print("=" * 60)
+        print("DEBUG: open_import_text_dialog llamado - INICIO")
+        print(f"DEBUG: append={append}, prefill_rows tiene {len(prefill_rows) if prefill_rows else 0} filas")
+        
+        # CRÍTICO: Usar el mismo mecanismo que _on_budget_selection_changed
+        # La última fila seleccionada se guarda automáticamente cuando el usuario selecciona
+        # IMPORTANTE: Capturar ANTES de abrir el diálogo porque puede cambiar después
+        saved_selected_row = self._last_selected_row
+        print(f"DEBUG: ===== CAPTURANDO SELECCIÓN AL INICIO ======")
+        print(f"DEBUG: _last_selected_row={saved_selected_row}")
+        
+        # También intentar capturar la selección actual como respaldo
+        try:
+            current_row = self.table.currentRow()
+            selected_items = self.table.selectedItems()
+            print(f"DEBUG: currentRow={current_row}, selectedItems count={len(selected_items) if selected_items else 0}")
+            if current_row >= 0 and saved_selected_row is None:
+                saved_selected_row = current_row
+                print(f"DEBUG: ✓ Usando currentRow como respaldo: fila {saved_selected_row}")
+            elif selected_items and saved_selected_row is None:
+                saved_selected_row = selected_items[0].row()
+                print(f"DEBUG: ✓ Usando selectedItems como respaldo: fila {saved_selected_row}")
+        except Exception as e:
+            print(f"DEBUG: ✗ Error capturando selección de respaldo: {e}")
+        
+        if saved_selected_row is not None:
+            print(f"DEBUG: ✓✓✓ SELECCIÓN CAPTURADA AL INICIO: fila {saved_selected_row}")
+        else:
+            print(f"DEBUG: ✗✗✗ NO HAY SELECCIÓN AL INICIO")
+        
+        # Marcar que estamos abriendo un diálogo de importación para evitar que eventFilter deseleccione
+        self._importing_from_dialog = True
+        
         dialog = ImportarPorTextoDialog(self, prefill_rows=prefill_rows)
         if dialog.exec():
             rows = dialog.result_rows()
+            print(f"DEBUG: rows después de dialog.exec(): {rows}")
             if not rows:
+                print("DEBUG: open_import_text_dialog - rows vacío, retornando")
                 return
+            print(f"DEBUG: Filas recibidas del diálogo: {rows}")
+            
+            # CRÍTICO: Verificar saved_selected_row DESPUÉS de cerrar el diálogo
+            # porque puede haber cambiado durante el diálogo
+            print(f"DEBUG: ===== DESPUÉS DE CERRAR DIÁLOGO ======")
+            print(f"DEBUG: saved_selected_row (capturado antes)={saved_selected_row}")
+            print(f"DEBUG: _last_selected_row (actual)={self._last_selected_row}")
+            
+            # Si saved_selected_row es None, usar _last_selected_row como respaldo
+            if saved_selected_row is None and self._last_selected_row is not None:
+                saved_selected_row = self._last_selected_row
+                print(f"DEBUG: ⚠⚠⚠ CORRIGIENDO: Usando _last_selected_row={saved_selected_row}")
+            
             # Insertar filas como capítulos o análisis según ITEM
             self.table.blockSignals(True)
             try:
@@ -399,32 +448,154 @@ class PresupuestoView(QWidget):
                 if not append:
                     self.table.setRowCount(0)
                     self.chapter_counter = 0
+                    # Si se limpió la tabla, la selección guardada ya no es válida
+                    saved_selected_row = None
+                    print(f"DEBUG: ⚠ Tabla limpiada (append=False), saved_selected_row=None")
+                
+                # Verificar si hay capítulos en las filas a importar
+                has_chapters = any(
+                    entry.get('item') and entry.get('item', '').strip().isdigit() 
+                    for entry in rows
+                )
+                
+                # Si no hay capítulos y no es anexo, agregar capítulo inicial "1"
+                if not append and not has_chapters and rows:
+                    chapter_row = 0  # Siempre al inicio si no hay nada
+                    self.table.insertRow(chapter_row)
+                    
+                    # Columna 0: Capítulo
+                    chapter_item = QTableWidgetItem("1")
+                    chapter_item.setData(Qt.ItemDataRole.UserRole, "chapter")
+                    chapter_item.setFlags(chapter_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    self.table.setItem(chapter_row, 0, chapter_item)
+                    
+                    # Columna 1: Descripción del capítulo
+                    desc_item = QTableWidgetItem("CAPÍTULO 1")
+                    desc_item.setData(Qt.ItemDataRole.UserRole, "chapter")
+                    desc_item.setFlags(desc_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    self.table.setItem(chapter_row, 1, desc_item)
+                    
+                    # Columnas restantes vacías
+                    for col in range(2, 6):
+                        empty_item = QTableWidgetItem("")
+                        empty_item.setFlags(empty_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                        self.table.setItem(chapter_row, col, empty_item)
+                    
+                    self.chapter_counter = 1
+                
+                # Usar la selección capturada ANTES de abrir el diálogo
+                # Si se limpió la tabla (append=False), la selección guardada ya no es válida
+                print(f"DEBUG: ===== VERIFICANDO SELECCIÓN PARA INSERTAR ======")
+                print(f"DEBUG: append={append}")
+                print(f"DEBUG: saved_selected_row (capturado al inicio)={saved_selected_row}")
+                print(f"DEBUG: _last_selected_row (actual)={self._last_selected_row}")
+                print(f"DEBUG: table.rowCount()={self.table.rowCount()}")
+                
+                # CRÍTICO: Si saved_selected_row es None pero _last_selected_row tiene valor, usarlo
+                # Esto puede pasar si la selección cambió después de capturar saved_selected_row
+                if saved_selected_row is None and self._last_selected_row is not None:
+                    saved_selected_row = self._last_selected_row
+                    print(f"DEBUG: ⚠ Usando _last_selected_row porque saved_selected_row era None: {saved_selected_row}")
+                
+                selected_row = None
+                if append and saved_selected_row is not None:
+                    # Verificar que la fila todavía existe y es válida
+                    if 0 <= saved_selected_row < self.table.rowCount():
+                        selected_row = saved_selected_row
+                        print(f"DEBUG: ✓✓✓ Usando selección guardada (append=True): fila {selected_row}")
+                    else:
+                        print(f"DEBUG: ✗ Selección guardada inválida: fila {saved_selected_row} fuera de rango (0-{self.table.rowCount()-1})")
+                elif append and saved_selected_row is None:
+                    print(f"DEBUG: ✗✗✗ ERROR: append=True pero saved_selected_row es None y _last_selected_row también es None")
+                elif not append:
+                    # Si no es append, la tabla fue limpiada, no usar selección guardada
+                    print(f"DEBUG: ✗ No usar selección guardada (append=False, tabla fue limpiada)")
+                
+                if selected_row is None:
+                    print(f"DEBUG: ✗✗✗ RESULTADO FINAL: selected_row=None - El capítulo se insertará al final de la tabla")
+                else:
+                    print(f"DEBUG: ✓✓✓ RESULTADO FINAL: selected_row={selected_row} - El capítulo se insertará ARRIBA de la fila {selected_row}")
+                
+                # Rastrear el último capítulo insertado en este lote para insertar análisis después de él
+                last_inserted_chapter_row = None
+                
                 for entry in rows:
+                    print(f"DEBUG: Procesando entry: {entry}")
                     item_str = (entry.get('item') or '').strip()
                     desc = (entry.get('descripcion') or '').strip()
                     und = (entry.get('unidad') or '').strip()
-                    cantidad = entry.get('cantidad') or 1.0
+                    cantidad = entry.get('cantidad', 1.0)
                     ifc_guids = entry.get('ifc_guids', None)
 
-                    if not desc:
-                        continue
-
                     # Capítulo: número entero (1, 2, 3)
+                    # IMPORTANTE: Verificar capítulos ANTES de verificar descripción,
+                    # porque los capítulos pueden tener descripción vacía
                     is_chapter = False
                     if item_str:
                         try:
                             # válido si es entero con solo dígitos
                             is_chapter = item_str.isdigit()
+                            # Debug para ver qué está detectando
+                            print(f"DEBUG: item_str='{item_str}', isdigit={item_str.isdigit()}, is_chapter={is_chapter}")
                         except Exception:
                             is_chapter = False
 
                     if is_chapter:
-                        self.add_chapter_row(desc, trigger_rebuild=False)
+                        # Si la descripción está vacía, usar el número como nombre del capítulo
+                        chapter_name = desc if desc else f"CAPÍTULO {item_str}"
+                        
+                        # SIMPLE: Usar _last_selected_row directamente SIEMPRE que exista y append=True
+                        print(f"DEBUG: ===== CREANDO CAPÍTULO: {chapter_name} =====")
+                        print(f"DEBUG: append={append}, _last_selected_row={self._last_selected_row}, rowCount={self.table.rowCount()}")
+                        
+                        insert_pos = None
+                        if append:
+                            if self._last_selected_row is not None:
+                                if 0 <= self._last_selected_row < self.table.rowCount():
+                                    insert_pos = self._last_selected_row
+                                    print(f"DEBUG: ✓✓✓ CAPÍTULO: Usando _last_selected_row={insert_pos}")
+                                else:
+                                    print(f"DEBUG: ✗ _last_selected_row={self._last_selected_row} fuera de rango (0-{self.table.rowCount()-1})")
+                            else:
+                                print(f"DEBUG: ✗ _last_selected_row es None")
+                        else:
+                            print(f"DEBUG: ✗ append=False, no usar selección")
+                        
+                        print(f"DEBUG: insert_pos FINAL={insert_pos}")
+                        chapter_row = self.add_chapter_row(chapter_name, trigger_rebuild=False, insert_position=insert_pos)
+                        print(f"DEBUG: Capítulo insertado en fila {chapter_row}")
+                        # Guardar la posición del capítulo recién insertado
+                        last_inserted_chapter_row = chapter_row
+                        # Si insertamos en una posición específica, actualizar selected_row para los siguientes capítulos
+                        if selected_row is not None and insert_pos is not None:
+                            selected_row += 1  # Siguiente capítulo debe ir después del que acabamos de insertar
+                        continue
+
+                    # Para análisis (no capítulos), sí necesitamos descripción
+                    if not desc:
                         continue
 
                     # Análisis: subnúmero como 1.1, 2.03, 3.1.1 (se acepta como texto)
-                    # Insertamos fila de análisis vacía con unidad/cantidad; costo unitario en 0 y pendiente de match
-                    row_idx = self.table.rowCount()
+                    # Determinar dónde insertar el análisis
+                    if last_inserted_chapter_row is not None:
+                        # Si acabamos de insertar un capítulo, insertar el análisis justo después de él
+                        row_idx = last_inserted_chapter_row + 1
+                        # Actualizar para el siguiente análisis
+                        last_inserted_chapter_row = row_idx
+                    elif selected_row is not None:
+                        # Buscar el último capítulo antes o en la posición seleccionada
+                        insert_after = -1
+                        for r in range(max(0, selected_row + 1)):
+                            it = self.table.item(r, 0)
+                            if it and it.data(Qt.ItemDataRole.UserRole) == 'chapter':
+                                insert_after = r
+                        if insert_after >= 0:
+                            row_idx = insert_after + 1
+                        else:
+                            row_idx = selected_row
+                    else:
+                        row_idx = self.table.rowCount()
+                    
                     self.table.insertRow(row_idx)
                     # Columna 0: item (se renumerará después), guardamos marcador para diferenciar de capítulos
                     code_item = QTableWidgetItem(item_str or "...")
@@ -466,7 +637,10 @@ class PresupuestoView(QWidget):
                 self.rebuild_table_safe()
             finally:
                 self.table.blockSignals(False)
-
+            
+            # Limpiar el flag después de procesar
+            self._importing_from_dialog = False
+            
             # Opcional: lanzar buscador para completar costos unitarios ahora
             try:
                 ask = QMessageBox.question(
@@ -538,6 +712,13 @@ class PresupuestoView(QWidget):
 
                 # Actualizar totales generales y subtotales después del proceso
                 self.update_total_presupuesto()
+            
+            # Cerrar el diálogo IFC si se pasó una referencia
+            if ifc_dialog is not None:
+                try:
+                    ifc_dialog.close()
+                except Exception:
+                    pass
 
     def open_match_dialog_for_selected(self):
         """Abre el buscador de análisis por unidad y descripción para la fila seleccionada."""
@@ -593,10 +774,32 @@ class PresupuestoView(QWidget):
                 self.table.blockSignals(False)
 
     def prompt_add_chapter(self):
-        """Pide al usuario el nombre del capítulo y lo agrega."""
+        """Pide al usuario el nombre del capítulo y lo agrega.
+        Si hay una fila seleccionada, inserta el capítulo justo arriba de esa fila.
+        El nuevo capítulo contendrá todo lo que está debajo hasta el siguiente capítulo.
+        Si no hay selección, lo agrega al final."""
+        # Detectar la fila seleccionada
+        selected_items = self.table.selectedItems()
+        insert_position = None
+        
+        if selected_items:
+            # Hay una fila seleccionada, insertar el capítulo justo arriba
+            selected_row = selected_items[0].row()
+            item = self.table.item(selected_row, 0)
+            
+            # Insertar el capítulo en la posición de la fila seleccionada
+            # Esto desplazará la fila seleccionada hacia abajo, quedando contenida en el nuevo capítulo
+            insert_position = selected_row
+        else:
+            # No hay selección, verificar si hay una fila actual (currentRow)
+            current_row = self.table.currentRow()
+            if current_row >= 0:
+                insert_position = current_row
+            # Si no hay selección ni fila actual, insert_position queda None (se agrega al final)
+        
         text, ok = QInputDialog.getText(self, 'Agregar Capítulo', 'Nombre del capítulo:')
         if ok and text:
-            self.add_chapter_row(text)
+            self.add_chapter_row(text, trigger_rebuild=True, insert_position=insert_position)
 
     def prompt_edit_chapter(self):
         """Permite editar el nombre del capítulo seleccionado."""
@@ -722,10 +925,25 @@ class PresupuestoView(QWidget):
                     f"El capítulo '{chapter_name}' ha sido eliminado correctamente."
                 )
 
-    def add_chapter_row(self, chapter_name, trigger_rebuild=True):
-        """Agrega una fila de capítulo al final de la tabla.
-        Si trigger_rebuild es False, no ejecuta la reconstrucción completa (útil durante importaciones masivas)."""
-        row = self.table.rowCount()
+    def add_chapter_row(self, chapter_name, trigger_rebuild=True, insert_position=None):
+        """Agrega una fila de capítulo a la tabla.
+        
+        Args:
+            chapter_name: Nombre del capítulo
+            trigger_rebuild: Si es False, no ejecuta la reconstrucción completa (útil durante importaciones masivas)
+            insert_position: Posición donde insertar el capítulo. Si es None, se agrega al final.
+        
+        Returns:
+            int: La fila donde se insertó el capítulo
+        """
+        print(f"DEBUG: add_chapter_row llamado con chapter_name='{chapter_name}', insert_position={insert_position}")
+        # Determinar posición de inserción
+        if insert_position is not None:
+            row = insert_position
+        else:
+            row = self.table.rowCount()
+        
+        print(f"DEBUG: Insertando capítulo en fila {row}")
         self.table.insertRow(row)
         
         item = QTableWidgetItem(chapter_name.upper())  # El número se asignará al renumerar
@@ -742,9 +960,13 @@ class PresupuestoView(QWidget):
         self.table.setItem(row, 0, item)
         self.table.setSpan(row, 0, 1, self.table.columnCount())
         
+        print(f"DEBUG: Capítulo insertado, span aplicado")
+        
         # Solo reconstruir inmediatamente si no estamos importando en bloque
         if trigger_rebuild:
             self.rebuild_table()
+        
+        return row
 
     def add_ifc_rebar_analysis(self, kg_total: float):
         """Agrega directamente el análisis de ACERO DE REFUERZO (08-08-11)
@@ -919,12 +1141,17 @@ class PresupuestoView(QWidget):
         try:
             items = self.table.selectedItems()
             if not items:
+                # Guardar que no hay selección
+                self._last_selected_row = None
                 if self._last_ifc_highlight_payload is not None:
                     self._last_ifc_highlight_payload = None
                     self.ifc_highlight_requested.emit([])
                 return
 
             row = items[0].row()
+            # CRÍTICO: Guardar la última fila seleccionada para usar en importación
+            self._last_selected_row = row
+            print(f"DEBUG: _on_budget_selection_changed - Fila seleccionada: {row}")
             code_item = self.table.item(row, 0)
             if not code_item:
                 if self._last_ifc_highlight_payload is not None:

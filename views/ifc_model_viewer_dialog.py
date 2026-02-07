@@ -69,6 +69,10 @@ class IFCModelViewerDialog(QDialog):
         else:
             # Ventana normal redimensionable con tamaño mínimo
             self.setMinimumSize(800, 600)
+            # Tamaño responsive: 70% del ancho y 70% del alto de la pantalla
+            from PyQt6.QtGui import QGuiApplication
+            screen = QGuiApplication.primaryScreen().availableSize()
+            self.resize(int(screen.width() * 0.7), int(screen.height() * 0.7))
 
         self.ifc_file = None
         self.settings = ifcopenshell.geom.settings()
@@ -1370,7 +1374,8 @@ class IFCModelViewerDialog(QDialog):
         try:
             parent = self.parent()
             if hasattr(parent, "open_import_text_dialog"):
-                parent.open_import_text_dialog(prefill_rows=prefill_rows, append=True)
+                # Pasar referencia a este diálogo IFC para que pueda cerrarlo al terminar
+                parent.open_import_text_dialog(prefill_rows=prefill_rows, append=True, ifc_dialog=self)
             else:
                 from .importar_por_texto_dialog import ImportarPorTextoDialog
                 dlg = ImportarPorTextoDialog(self, prefill_rows=prefill_rows)
