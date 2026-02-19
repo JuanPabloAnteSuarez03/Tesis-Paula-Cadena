@@ -230,6 +230,25 @@ class MainWindow(QMainWindow):
         self.analisis_presupuesto_widget = None
         self._analisis_presupuesto_ctrls = []
 
+    def _create_placeholder_widget(self, title: str, message: str) -> QWidget:
+        """Crea un widget placeholder para módulos no implementados aún."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        title_label = QLabel(title)
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title_label.setStyleSheet("font-size: 22px; font-weight: bold; color: #0078d7; margin-bottom: 12px;")
+
+        msg_label = QLabel(message)
+        msg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        msg_label.setStyleSheet("font-size: 14px; color: #555555;")
+        msg_label.setWordWrap(True)
+
+        layout.addWidget(title_label)
+        layout.addWidget(msg_label)
+        return widget
+
     def on_mode_changed(self, idx: int):
         text = self.mode_select.currentText()
         if text == "Presupuesto":
@@ -274,6 +293,26 @@ class MainWindow(QMainWindow):
             else:
                 self._populate_analisis_presupuesto_widget()
             self.center_stack.setCurrentWidget(self.analisis_presupuesto_widget)
+        elif text == "Ejecución (Gastos)":
+            if not hasattr(self, '_ejecucion_widget') or self._ejecucion_widget is None:
+                from views.ejecucion_view import EjecucionView
+                self._ejecucion_widget = EjecucionView()
+                self.center_stack.addWidget(self._ejecucion_widget)
+            else:
+                # Refrescar datos cada vez que se activa la pestaña
+                try:
+                    self._ejecucion_widget.refresh()
+                except Exception:
+                    pass
+            self.center_stack.setCurrentWidget(self._ejecucion_widget)
+        elif text == "Control EVM (Valor Ganado)":
+            if not hasattr(self, '_evm_widget') or self._evm_widget is None:
+                self._evm_widget = self._create_placeholder_widget(
+                    "Control EVM (Valor Ganado)",
+                    "Módulo de control de valor ganado (Earned Value Management).\n(Próximamente)"
+                )
+                self.center_stack.addWidget(self._evm_widget)
+            self.center_stack.setCurrentWidget(self._evm_widget)
         else:
             # Otras vistas aún no implementadas: mostrar Presupuesto por defecto
             self.center_stack.setCurrentWidget(self.presupuesto_controller.view)
@@ -346,7 +385,7 @@ class MainWindow(QMainWindow):
         
         # Selector central de modo
         self.mode_select = QComboBox()
-        self.mode_select.addItems(["Presupuesto", "AIU", "Análisis Unitario", "Cronograma"])
+        self.mode_select.addItems(["Presupuesto", "AIU", "Análisis Unitario", "Ejecución (Gastos)", "Cronograma", "Control EVM (Valor Ganado)"])
         self.mode_select.setCurrentIndex(0)
         self.mode_select.currentIndexChanged.connect(self.on_mode_changed)
         # Estilo tipo botón azul con flecha blanca
