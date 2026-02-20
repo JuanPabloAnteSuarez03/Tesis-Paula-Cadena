@@ -1,18 +1,22 @@
 # models/factura.py
 from .database import Base
-from sqlalchemy import Column, Integer, String, Date, Float
+from sqlalchemy import Column, Integer, String, Date, Float, ForeignKey
 from sqlalchemy.orm import relationship
 
 
 class Factura(Base):
     __tablename__ = "facturas"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id             = Column(Integer, primary_key=True, autoincrement=True)
     numero_factura = Column(String, nullable=False)
-    fecha = Column(Date, nullable=False)
-    proveedor = Column(String, nullable=False, default="")
+    fecha          = Column(Date, nullable=False)
+    proveedor      = Column(String, nullable=False, default="")
+    ejecucion_id   = Column(Integer, ForeignKey("ejecuciones.id"), nullable=True)
 
-    # Relación 1:N con los ítems de la factura
+    # Relación N:1 con Ejecucion
+    ejecucion = relationship("Ejecucion", back_populates="facturas")
+
+    # Relación 1:N con ítems
     items = relationship(
         "FacturaItem",
         back_populates="factura",
@@ -23,4 +27,3 @@ class Factura(Base):
     @property
     def total(self) -> float:
         return sum(item.total for item in self.items)
-

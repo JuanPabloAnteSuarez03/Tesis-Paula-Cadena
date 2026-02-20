@@ -18,18 +18,37 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QDate, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
 
+from sqlalchemy import text
 from models.database import SessionLocal, engine, Base
+from models.ejecucion import Ejecucion
 from models.factura import Factura
 from models.factura_item import FacturaItem
 from models.pago_nomina import PagoNomina
 
 
 def _ensure_tables():
-    """Crea las tablas de ejecución si aún no existen en la BD."""
+    """Crea tablas de ejecución y migra columnas nuevas si no existen."""
     try:
+        # 1. Crea la tabla ejecuciones (y otras nuevas) si no existen
         Base.metadata.create_all(bind=engine, checkfirst=True)
     except Exception as e:
         print(f"[EjecucionView] advertencia al crear tablas: {e}")
+
+    # 2. Migrar columna ejecucion_id en facturas y pagos_nomina
+    #    (ALTER TABLE … ADD COLUMN IF NOT EXISTS — solo PostgreSQL)
+    _alter_sqls = [
+        "ALTER TABLE facturas     ADD COLUMN IF NOT EXISTS ejecucion_id INTEGER REFERENCES ejecuciones(id)",
+        "ALTER TABLE pagos_nomina ADD COLUMN IF NOT EXISTS ejecucion_id INTEGER REFERENCES ejecuciones(id)",
+    ]
+    try:
+        with engine.begin() as conn:
+            for sql in _alter_sqls:
+                try:
+                    conn.execute(text(sql))
+                except Exception:
+                    pass   # columna ya existe u otro error no crítico
+    except Exception as e:
+        print(f"[EjecucionView] advertencia en migración: {e}")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -293,7 +312,14 @@ class ComprasWidget(QWidget):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._items_temp: list[dict] = []   # ítems de la factura en construcción
+        self._ejecucion_id: int | None = None
         self._setup_ui()
+        self._reload_history()
+        self._reload_autocomplete()
+
+    def set_ejecucion(self, ejecucion_id: int | None):
+        """Cambia la ejecución activa y recarga los datos."""
+        self._ejecucion_id = ejecucion_id
         self._reload_history()
         self._reload_autocomplete()
 
@@ -486,6 +512,11 @@ class ComprasWidget(QWidget):
         session = SessionLocal()
         try:
             query = session.query(Factura)
+            # Filtrar por ejecución activa
+            if self._ejecucion_id is not None:
+                query = query.filter(Factura.ejecucion_id == self._ejecucion_id)
+            else:
+                query = query.filter(Factura.ejecucion_id.is_(None))
             if self._orden_fecha:
                 query = query.order_by(Factura.fecha.desc())
             else:
@@ -600,6 +631,10 @@ class ComprasWidget(QWidget):
         self._update_total_temp()
 
     def _on_guardar_factura(self):
+        if self._ejecucion_id is None:
+            QMessageBox.warning(self, "Sin ejecución",
+                "Selecciona o crea una ejecución antes de registrar facturas.")
+            return
         num = self.le_num_factura.text().strip().upper()
         proveedor = self.cb_proveedor.currentText().strip().upper()
         if not num:
@@ -618,6 +653,7 @@ class ComprasWidget(QWidget):
                 numero_factura=num,
                 fecha=fecha_py,
                 proveedor=proveedor,
+                ejecucion_id=self._ejecucion_id,
             )
             session.add(factura)
             session.flush()  # para obtener el ID
@@ -732,12 +768,17 @@ class ComprasWidget(QWidget):
             self._reload_history()
 
     def get_total_compras(self) -> float:
-        """Devuelve el total acumulado de todas las compras registradas."""
+        """Devuelve el total acumulado de compras de la ejecución activa."""
         session = SessionLocal()
         try:
             from sqlalchemy import func
-            result = session.query(func.coalesce(func.sum(FacturaItem.total), 0.0)).scalar()
-            return float(result)
+            query = session.query(func.coalesce(func.sum(FacturaItem.total), 0.0))\
+                           .join(Factura, FacturaItem.factura_id == Factura.id)
+            if self._ejecucion_id is not None:
+                query = query.filter(Factura.ejecucion_id == self._ejecucion_id)
+            else:
+                query = query.filter(Factura.ejecucion_id.is_(None))
+            return float(query.scalar())
         except Exception:
             return 0.0
         finally:
@@ -905,7 +946,14 @@ class NominaWidget(QWidget):
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
+        self._ejecucion_id: int | None = None
         self._setup_ui()
+        self._reload_history()
+        self._reload_autocomplete()
+
+    def set_ejecucion(self, ejecucion_id: int | None):
+        """Cambia la ejecución activa y recarga los datos."""
+        self._ejecucion_id = ejecucion_id
         self._reload_history()
         self._reload_autocomplete()
 
@@ -1026,7 +1074,12 @@ class NominaWidget(QWidget):
     def _reload_history(self):
         session = SessionLocal()
         try:
-            pagos = session.query(PagoNomina).order_by(PagoNomina.fecha.desc()).all()
+            query = session.query(PagoNomina)
+            if self._ejecucion_id is not None:
+                query = query.filter(PagoNomina.ejecucion_id == self._ejecucion_id)
+            else:
+                query = query.filter(PagoNomina.ejecucion_id.is_(None))
+            pagos = query.order_by(PagoNomina.fecha.desc()).all()
             self.tbl_hist.setRowCount(0)
             acumulado = 0.0
             for pago in pagos:
@@ -1064,6 +1117,10 @@ class NominaWidget(QWidget):
             self.lbl_valor.setText("Valor Total:")
 
     def _on_guardar_pago(self):
+        if self._ejecucion_id is None:
+            QMessageBox.warning(self, "Sin ejecución",
+                "Selecciona o crea una ejecución antes de registrar pagos.")
+            return
         trabajador = self.cb_trabajador.currentText().strip().upper()
         cargo = self.cb_cargo.currentText().strip().upper()
         if not trabajador:
@@ -1100,6 +1157,7 @@ class NominaWidget(QWidget):
                 valor=valor,
                 total=total,
                 observacion=observacion,
+                ejecucion_id=self._ejecucion_id,
             )
             session.add(pago)
             session.commit()
@@ -1152,12 +1210,16 @@ class NominaWidget(QWidget):
         self._reload_history()
 
     def get_total_nomina(self) -> float:
-        """Devuelve el total acumulado de todos los pagos de nómina."""
+        """Devuelve el total acumulado de pagos de nómina de la ejecución activa."""
         session = SessionLocal()
         try:
             from sqlalchemy import func
-            result = session.query(func.coalesce(func.sum(PagoNomina.total), 0.0)).scalar()
-            return float(result)
+            query = session.query(func.coalesce(func.sum(PagoNomina.total), 0.0))
+            if self._ejecucion_id is not None:
+                query = query.filter(PagoNomina.ejecucion_id == self._ejecucion_id)
+            else:
+                query = query.filter(PagoNomina.ejecucion_id.is_(None))
+            return float(query.scalar())
         except Exception:
             return 0.0
         finally:
@@ -1427,16 +1489,74 @@ class EjecucionView(QWidget):
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
+        _ensure_tables()
         # Forzar modo claro independientemente del tema del sistema
         self.setStyleSheet(_LIGHT_STYLE)
         self._setup_ui()
+        self._reload_ejecuciones()
 
+    # ── UI ─────────────────────────────────────────────────────────────────────
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Banner de costo total
+        # ── Barra selectora de ejecución ─────────────────────────────────────
+        selector_bar = QFrame()
+        selector_bar.setFixedHeight(52)
+        selector_bar.setStyleSheet(
+            "background-color: #ecf0f1; border-bottom: 1px solid #bdc3c7; border-top: none;"
+        )
+        sb_lay = QHBoxLayout(selector_bar)
+        sb_lay.setContentsMargins(14, 6, 14, 6)
+        sb_lay.setSpacing(10)
+
+        lbl_ejec = QLabel("📁  Ejecución activa:")
+        lbl_ejec.setStyleSheet(
+            "font-weight: bold; color: #2c3e50; font-size: 13px; background: transparent; border: none;"
+        )
+        sb_lay.addWidget(lbl_ejec)
+
+        self.cb_ejecucion = QComboBox()
+        self.cb_ejecucion.setFixedWidth(320)
+        self.cb_ejecucion.setPlaceholderText("— Seleccionar ejecución —")
+        self.cb_ejecucion.setStyleSheet(
+            "QComboBox { background: white; color: #2c3e50; border: 1px solid #bdc3c7; "
+            "border-radius: 4px; padding: 5px 10px; font-size: 13px; }"
+            "QComboBox:hover { border-color: #3498db; }"
+            "QComboBox::drop-down { border: none; width: 24px; background: #3498db; "
+            "border-top-right-radius: 4px; border-bottom-right-radius: 4px; }"
+            "QComboBox::down-arrow { image: url(views/arrow_down_white.svg); width:14px; height:14px; }"
+        )
+        self.cb_ejecucion.currentIndexChanged.connect(self._on_ejecucion_changed)
+        sb_lay.addWidget(self.cb_ejecucion)
+
+        btn_nueva = QPushButton("➕  Nueva Ejecución")
+        btn_nueva.setFixedHeight(34)
+        btn_nueva.setStyleSheet(
+            "QPushButton { background-color: #27ae60; color: white; border-radius: 4px; "
+            "font-weight: bold; font-size: 13px; padding: 0 16px; border: none; }"
+            "QPushButton:hover { background-color: #1e8449; }"
+            "QPushButton:pressed { background-color: #196f3d; }"
+        )
+        btn_nueva.clicked.connect(self._on_nueva_ejecucion)
+        sb_lay.addWidget(btn_nueva)
+
+        btn_eliminar_ejec = QPushButton("🗑  Eliminar")
+        btn_eliminar_ejec.setFixedHeight(34)
+        btn_eliminar_ejec.setStyleSheet(
+            "QPushButton { background-color: #e74c3c; color: white; border-radius: 4px; "
+            "font-weight: bold; font-size: 13px; padding: 0 14px; border: none; }"
+            "QPushButton:hover { background-color: #c0392b; }"
+            "QPushButton:pressed { background-color: #a93226; }"
+        )
+        btn_eliminar_ejec.clicked.connect(self._on_eliminar_ejecucion)
+        sb_lay.addWidget(btn_eliminar_ejec)
+
+        sb_lay.addStretch()
+        layout.addWidget(selector_bar)
+
+        # ── Banner de costo total ─────────────────────────────────────────────
         self.lbl_total = QLabel("COSTO TOTAL EJECUTADO: $ 0")
         self.lbl_total.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
         self.lbl_total.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1445,20 +1565,131 @@ class EjecucionView(QWidget):
         )
         layout.addWidget(self.lbl_total)
 
-        # Sub-pestañas
+        # ── Sub-pestañas ──────────────────────────────────────────────────────
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
 
         self.compras_widget = ComprasWidget()
-        self.nomina_widget = NominaWidget()
+        self.nomina_widget  = NominaWidget()
 
         self.tabs.addTab(self.compras_widget, "🧱 COMPRAS")
-        self.tabs.addTab(self.nomina_widget, "👷 NÓMINA")
+        self.tabs.addTab(self.nomina_widget,  "👷 NÓMINA")
 
-        # Actualizar total al cambiar de pestaña
         self.tabs.currentChanged.connect(self._actualizar_total)
         self._actualizar_total()
 
+    # ── Gestión de ejecuciones ────────────────────────────────────────────────
+
+    def _reload_ejecuciones(self):
+        """Recarga el ComboBox con todas las ejecuciones existentes."""
+        session = SessionLocal()
+        try:
+            ejecuciones = session.query(Ejecucion).order_by(Ejecucion.creado_en.desc()).all()
+            self._ejecuciones_list: list[tuple[int, str]] = [
+                (e.id, e.nombre) for e in ejecuciones
+            ]
+        except Exception as e:
+            print("Error cargando ejecuciones:", e)
+            self._ejecuciones_list = []
+        finally:
+            session.close()
+
+        self.cb_ejecucion.blockSignals(True)
+        self.cb_ejecucion.clear()
+        for eid, nombre in self._ejecuciones_list:
+            self.cb_ejecucion.addItem(nombre, userData=eid)
+        self.cb_ejecucion.blockSignals(False)
+
+        # Seleccionar la primera automáticamente si existe
+        if self._ejecuciones_list:
+            self.cb_ejecucion.setCurrentIndex(0)
+            self._on_ejecucion_changed(0)
+        else:
+            self._set_ejecucion_activa(None)
+
+    def _on_ejecucion_changed(self, index: int):
+        if index < 0 or index >= len(self._ejecuciones_list):
+            self._set_ejecucion_activa(None)
+            return
+        eid = self.cb_ejecucion.itemData(index)
+        self._set_ejecucion_activa(eid)
+
+    def _set_ejecucion_activa(self, ejecucion_id: int | None):
+        self.compras_widget.set_ejecucion(ejecucion_id)
+        self.nomina_widget.set_ejecucion(ejecucion_id)
+        self._actualizar_total()
+
+    def _on_nueva_ejecucion(self):
+        from PyQt6.QtWidgets import QInputDialog
+        nombre, ok = QInputDialog.getText(
+            self, "Nueva Ejecución",
+            "Nombre de la nueva ejecución\n(p.ej. «Obra Colegio 2025» o «Fase 1»):",
+        )
+        if not ok or not nombre.strip():
+            return
+        nombre = nombre.strip()
+
+        session = SessionLocal()
+        try:
+            # Verificar que no exista
+            existe = session.query(Ejecucion).filter(
+                Ejecucion.nombre == nombre
+            ).first()
+            if existe:
+                QMessageBox.warning(self, "Nombre duplicado",
+                    f"Ya existe una ejecución llamada «{nombre}».")
+                return
+            nueva = Ejecucion(nombre=nombre)
+            session.add(nueva)
+            session.commit()
+            nuevo_id = nueva.id
+        except Exception as e:
+            session.rollback()
+            QMessageBox.critical(self, "Error", f"No se pudo crear la ejecución:\n{e}")
+            return
+        finally:
+            session.close()
+
+        self._reload_ejecuciones()
+        # Seleccionar la recién creada
+        for i, (eid, _) in enumerate(self._ejecuciones_list):
+            if eid == nuevo_id:
+                self.cb_ejecucion.setCurrentIndex(i)
+                break
+
+    def _on_eliminar_ejecucion(self):
+        idx = self.cb_ejecucion.currentIndex()
+        if idx < 0 or idx >= len(self._ejecuciones_list):
+            QMessageBox.warning(self, "Sin selección",
+                "Selecciona primero una ejecución para eliminar.")
+            return
+        eid, nombre = self._ejecuciones_list[idx]
+        resp = QMessageBox.question(
+            self, "Confirmar eliminación",
+            f"¿Eliminar la ejecución «{nombre}» y TODOS sus registros\n"
+            f"(facturas y pagos de nómina) asociados?\n\n"
+            f"⚠️ Esta acción NO se puede deshacer.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if resp != QMessageBox.StandardButton.Yes:
+            return
+
+        session = SessionLocal()
+        try:
+            ejec = session.query(Ejecucion).get(eid)
+            if ejec:
+                session.delete(ejec)
+                session.commit()
+        except Exception as e:
+            session.rollback()
+            QMessageBox.critical(self, "Error", f"No se pudo eliminar:\n{e}")
+            return
+        finally:
+            session.close()
+
+        self._reload_ejecuciones()
+
+    # ── Total banner ──────────────────────────────────────────────────────────
     def _actualizar_total(self):
         """Recalcula el banner de costo total (compras + nómina)."""
         try:
@@ -1471,9 +1702,6 @@ class EjecucionView(QWidget):
 
     def refresh(self):
         """Recarga todos los datos (útil cuando se activa la pestaña)."""
-        self.compras_widget._reload_history()
-        self.compras_widget._reload_autocomplete()
-        self.nomina_widget._reload_history()
-        self.nomina_widget._reload_autocomplete()
+        self._reload_ejecuciones()
         self._actualizar_total()
 

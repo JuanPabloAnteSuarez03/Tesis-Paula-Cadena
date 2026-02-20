@@ -305,13 +305,27 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
             self.center_stack.setCurrentWidget(self._ejecucion_widget)
+        elif text == "Cronograma":
+            if not hasattr(self, '_cronograma_widget') or self._cronograma_widget is None:
+                from views.cronograma_view import CronogramaView
+                # Pasamos la vista de presupuesto para leer los análisis en memoria
+                ppto_view = getattr(self.presupuesto_controller, 'view', None)
+                self._cronograma_widget = CronogramaView(presupuesto_view=ppto_view)
+                self.center_stack.addWidget(self._cronograma_widget)
+            self.center_stack.setCurrentWidget(self._cronograma_widget)
         elif text == "Control EVM (Valor Ganado)":
             if not hasattr(self, '_evm_widget') or self._evm_widget is None:
-                self._evm_widget = self._create_placeholder_widget(
-                    "Control EVM (Valor Ganado)",
-                    "Módulo de control de valor ganado (Earned Value Management).\n(Próximamente)"
+                from views.evm_view import EvmView
+                self._evm_widget = EvmView(
+                    get_cronograma_fn=lambda: getattr(self, '_cronograma_widget', None),
+                    get_presupuesto_fn=lambda: getattr(self.presupuesto_controller, 'view', None),
                 )
                 self.center_stack.addWidget(self._evm_widget)
+            else:
+                try:
+                    self._evm_widget.refresh()
+                except Exception:
+                    pass
             self.center_stack.setCurrentWidget(self._evm_widget)
         else:
             # Otras vistas aún no implementadas: mostrar Presupuesto por defecto
