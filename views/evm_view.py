@@ -12,6 +12,8 @@ Métricas calculadas:
 
   SPI = EV / PV   (índice de rendimiento de cronograma)
   CPI = EV / AC   (índice de rendimiento de costos)
+  CV  = EV - AC   (variación de costo, en dinero)
+  SV  = EV - PV   (variación de cronograma, en dinero)
 """
 from __future__ import annotations
 
@@ -376,6 +378,38 @@ class EvmView(QWidget):
         self.lbl_cpi_diag.setMinimumWidth(260)
         cpi_row.addWidget(self.lbl_cpi_diag)
         salud_lay.addLayout(cpi_row)
+
+        # CV row
+        cv_row = QHBoxLayout()
+        lbl_cv_tit = QLabel("CV (EV - AC):")
+        lbl_cv_tit.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        lbl_cv_tit.setMinimumWidth(170)
+        cv_row.addWidget(lbl_cv_tit)
+        self.lbl_cv_val = QLabel("–")
+        self.lbl_cv_val.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        self.lbl_cv_val.setMinimumWidth(120)
+        cv_row.addWidget(self.lbl_cv_val)
+        cv_row.addStretch(1)
+        self.lbl_cv_diag = QLabel("")
+        self.lbl_cv_diag.setMinimumWidth(260)
+        cv_row.addWidget(self.lbl_cv_diag)
+        salud_lay.addLayout(cv_row)
+
+        # SV row
+        sv_row = QHBoxLayout()
+        lbl_sv_tit = QLabel("SV (EV - PV):")
+        lbl_sv_tit.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        lbl_sv_tit.setMinimumWidth(170)
+        sv_row.addWidget(lbl_sv_tit)
+        self.lbl_sv_val = QLabel("–")
+        self.lbl_sv_val.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        self.lbl_sv_val.setMinimumWidth(120)
+        sv_row.addWidget(self.lbl_sv_val)
+        sv_row.addStretch(1)
+        self.lbl_sv_diag = QLabel("")
+        self.lbl_sv_diag.setMinimumWidth(260)
+        sv_row.addWidget(self.lbl_sv_diag)
+        salud_lay.addLayout(sv_row)
 
         # Diagnóstico general
         self.lbl_diagnostico = QLabel(
@@ -815,19 +849,28 @@ class EvmView(QWidget):
             )
             self.lbl_spi_val.setText("–")
             self.lbl_cpi_val.setText("–")
+            self.lbl_cv_val.setText("–")
+            self.lbl_sv_val.setText("–")
             self.bar_spi.setValue(0)
             self.bar_cpi.setValue(0)
             self.lbl_spi_diag.setText("")
             self.lbl_cpi_diag.setText("")
+            self.lbl_cv_diag.setText("")
+            self.lbl_sv_diag.setText("")
             return
 
         # SPI
         spi = ev / pv if pv > 0 else 0.0
         # CPI
         cpi = ev / ac if ac > 0 else 0.0
+        # Variaciones en dinero
+        cv = ev - ac
+        sv = ev - pv
 
         self.lbl_spi_val.setText(f"{spi:.2f}")
         self.lbl_cpi_val.setText(f"{cpi:.2f}")
+        self.lbl_cv_val.setText(_fmt(cv))
+        self.lbl_sv_val.setText(_fmt(sv))
 
         # Barras (escala 0-200 donde 100 = 1.0)
         self.bar_spi.setValue(min(int(spi * 100), 200))
@@ -875,6 +918,27 @@ class EvmView(QWidget):
         self.lbl_spi_diag.setStyleSheet(f"color: {spi_color}; background: transparent;")
         self.lbl_cpi_diag.setText(cpi_txt)
         self.lbl_cpi_diag.setStyleSheet(f"color: {cpi_color}; background: transparent;")
+
+        # CV/SV interpretación (dinero)
+        if cv >= 0:
+            cv_color = "#27ae60"
+            cv_txt = "🟢 COSTO FAVORABLE – EV cubre el costo real"
+        else:
+            cv_color = "#e74c3c"
+            cv_txt = "🔴 SOBRECOSTO – AC supera el valor ganado"
+        if sv >= 0:
+            sv_color = "#27ae60"
+            sv_txt = "🟢 ADELANTO EN VALOR – EV por encima del plan"
+        else:
+            sv_color = "#e74c3c"
+            sv_txt = "🔴 ATRASO EN VALOR – EV por debajo del plan"
+
+        self.lbl_cv_diag.setText(cv_txt)
+        self.lbl_cv_diag.setStyleSheet(f"color: {cv_color}; background: transparent;")
+        self.lbl_sv_diag.setText(sv_txt)
+        self.lbl_sv_diag.setStyleSheet(f"color: {sv_color}; background: transparent;")
+        self.lbl_cv_val.setStyleSheet(f"color: {cv_color}; background: transparent;")
+        self.lbl_sv_val.setStyleSheet(f"color: {sv_color}; background: transparent;")
 
         # Diagnóstico general
         if spi >= 1.0 and cpi >= 1.0:

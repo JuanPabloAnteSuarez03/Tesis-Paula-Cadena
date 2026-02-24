@@ -423,7 +423,7 @@ class MainWindow(QMainWindow):
             }
         """)
         self.toggle_left_btn.clicked.connect(self.toggle_left_panel)
-
+        
         # ── Tab bar de navegación (reemplaza el QComboBox) ────────────────────
         self._tab_names = [
             "Presupuesto",
@@ -475,7 +475,7 @@ class MainWindow(QMainWindow):
 
         # Mantener mode_select como alias por compatibilidad (no se muestra)
         self.mode_select = self.mode_tabs   # alias para no romper código externo
-
+        
         # Botón para mostrar/ocultar panel derecho (análisis)
         self.toggle_right_btn = QPushButton("Análisis ≡")
         self.toggle_right_btn.setStyleSheet("""
@@ -492,7 +492,7 @@ class MainWindow(QMainWindow):
             }
         """)
         self.toggle_right_btn.clicked.connect(self.toggle_right_panel)
-
+        
         # Agregar widgets a la barra superior
         top_bar_layout.addWidget(self.toggle_left_btn)
         top_bar_layout.addWidget(self.mode_tabs, 1)   # expansible
@@ -880,7 +880,7 @@ class MainWindow(QMainWindow):
                     self.ifc_3d_view_left.plotter.render()
             except Exception:
                 pass
-
+        
     def toggle_right_panel(self):
         """Muestra u oculta el panel derecho de análisis unitarios."""
         visible = not self.right_panel.isVisible()
