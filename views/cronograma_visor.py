@@ -1104,6 +1104,9 @@ class VisorProjectPro(QMainWindow):
                     if t['duration'] > 0: pct_esp = (dias_pasados / t['duration']) * 100
                     else: pct_esp = 100.0 if fecha_corte_dt >= t['start'] else 0.0
 
+                # Persistir % Esp. en el dict de la tarea para que EVM lo use
+                t['pct_esp'] = pct_esp
+
                 item.setText(4, f"{pct_esp:.1f}%")
                 item.setForeground(4, QBrush(QColor("#555555")))
 

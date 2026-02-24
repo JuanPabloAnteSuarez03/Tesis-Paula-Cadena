@@ -556,12 +556,17 @@ class EvmView(QWidget):
         session = SessionLocal()
         try:
             # Compras (FacturaItem → Factura)
+            # Se usa COALESCE(fecha_programada, fecha):
+            #   - Si la factura tiene fecha_programada  → se filtra por ella (consumo diferido)
+            #   - Si es NULL (Consumo Inmediato)         → se filtra por la fecha de compra
+            # Solo se acumula al AC el gasto cuya fecha efectiva <= fecha de corte.
+            fecha_efectiva = func.coalesce(Factura.fecha_programada, Factura.fecha)
             total_compras = (
                 session.query(func.coalesce(func.sum(FacturaItem.total), 0.0))
                 .join(Factura)
                 .filter(
                     Factura.ejecucion_id == eid,
-                    Factura.fecha <= fecha_corte,
+                    fecha_efectiva <= fecha_corte,
                 )
                 .scalar()
             )
@@ -626,8 +631,18 @@ class EvmView(QWidget):
             is_bold = is_summary or is_root
 
             # Cantidad planeada y ejecutada
-            cant_plan = t.get("cantidad_obra", 0)
-            cant_ejec = t.get("cantidad_real", 0)
+            # cant_plan = cantidad total de la tarea × fracción programada al corte (% Esp.)
+            # Esto replica la lógica de app.py: cant_esperada = plan * (pct_esp / 100)
+            pct_esp = t.get("pct_esp", 100.0)   # 100% si no hay corte activo
+            try:
+                cant_plan_total = float(t.get("cantidad_obra", 0) or 0)
+            except (ValueError, TypeError):
+                cant_plan_total = 0.0
+            cant_plan = cant_plan_total * (pct_esp / 100.0)
+            try:
+                cant_ejec = float(t.get("cantidad_real", 0) or 0)
+            except (ValueError, TypeError):
+                cant_ejec = 0.0
 
             # Nombre con indentación visual
             indent = t.get("indent", 1)
@@ -664,14 +679,19 @@ class EvmView(QWidget):
             self.tabla.setItem(row, 0, locked(str(t.get("id_visual", "")), is_bold))
             # 1: Nombre
             self.tabla.setItem(row, 1, locked(nombre_texto, is_bold))
-            # 2: Cant. Plan
-            cant_plan_txt = str(cant_plan) if (not is_summary or cant_plan) else ""
+            # 2: Cant. Plan  (= cantidad_obra × % Esp. / 100  — porción programada al corte)
+            if is_summary or cant_plan == 0:
+                cant_plan_txt = ""
+            elif cant_plan == int(cant_plan):
+                cant_plan_txt = str(int(cant_plan))
+            else:
+                cant_plan_txt = f"{cant_plan:.2f}"
             self.tabla.setItem(row, 2, locked(cant_plan_txt, is_bold))
             # 3: Valor Unit (editable, fondo amarillo)
             it_unit = QTableWidgetItem(f"{val_unit_prev:,.0f}" if val_unit_prev else "")
             it_unit.setFont(font_reg)
             it_unit.setBackground(QBrush(color_yellow))
-            if is_summary:
+            if is_summary or is_root:
                 it_unit.setFlags(it_unit.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 it_unit.setBackground(QBrush(
                     color_root if is_root else color_summary

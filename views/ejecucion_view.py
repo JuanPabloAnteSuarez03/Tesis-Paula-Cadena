@@ -34,11 +34,12 @@ def _ensure_tables():
     except Exception as e:
         print(f"[EjecucionView] advertencia al crear tablas: {e}")
 
-    # 2. Migrar columna ejecucion_id en facturas y pagos_nomina
+    # 2. Migrar columnas nuevas si no existen
     #    (ALTER TABLE … ADD COLUMN IF NOT EXISTS — solo PostgreSQL)
     _alter_sqls = [
         "ALTER TABLE facturas     ADD COLUMN IF NOT EXISTS ejecucion_id INTEGER REFERENCES ejecuciones(id)",
         "ALTER TABLE pagos_nomina ADD COLUMN IF NOT EXISTS ejecucion_id INTEGER REFERENCES ejecuciones(id)",
+        "ALTER TABLE facturas     ADD COLUMN IF NOT EXISTS fecha_programada DATE",
     ]
     try:
         with engine.begin() as conn:
@@ -358,6 +359,19 @@ class ComprasWidget(QWidget):
         self.cb_proveedor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         g_datos.addWidget(self.cb_proveedor, 1, 1, 1, 3)
 
+        # Consumo Inmediato / Fecha Programada
+        self.chk_consumo_inmediato = QCheckBox("✓ Consumo Inmediato")
+        self.chk_consumo_inmediato.setChecked(True)
+        g_datos.addWidget(self.chk_consumo_inmediato, 2, 0, 1, 2)
+
+        g_datos.addWidget(QLabel("Fecha Programada:"), 2, 2)
+        self.de_fecha_programada = _make_date_edit()
+        self.de_fecha_programada.setEnabled(False)
+        g_datos.addWidget(self.de_fecha_programada, 2, 3)
+
+        # Lógica: al desmarcar "Consumo Inmediato", habilitar la fecha programada
+        self.chk_consumo_inmediato.toggled.connect(self._on_consumo_inmediato_toggled)
+
         l_left.addWidget(grp_datos)
 
         # 2. Agregar ítems
@@ -551,6 +565,14 @@ class ComprasWidget(QWidget):
                     self.tbl_hist.setItem(row, 4, _locked_item(_fmt(item.total)))
                     acumulado += item.total
 
+                    # Fila amarilla si la fecha de compra difiere de la fecha programada
+                    if (factura.fecha_programada and
+                            factura.fecha_programada != factura.fecha):
+                        for c in range(5):
+                            cell = self.tbl_hist.item(row, c)
+                            if cell:
+                                cell.setBackground(QColor("#fcf3cf"))
+
             self.lbl_acumulado.setText(f"Acumulado: {_fmt(acumulado)}")
         except Exception as e:
             print("Error cargando historial compras:", e)
@@ -560,6 +582,13 @@ class ComprasWidget(QWidget):
     def _update_total_temp(self):
         total = sum(i["total"] for i in self._items_temp)
         self.lbl_total_fact.setText(f"Total Factura: {_fmt(total)}")
+
+    def _on_consumo_inmediato_toggled(self, checked: bool):
+        """Habilita/deshabilita la Fecha Programada según el checkbox."""
+        self.de_fecha_programada.setEnabled(not checked)
+        if checked:
+            # Sincronizar con la fecha de compra
+            self.de_fecha_programada.setDate(self.de_fecha.date())
 
     # ── Slots ─────────────────────────────────────────────────────────────────
 
@@ -647,11 +676,21 @@ class ComprasWidget(QWidget):
         qdate = self.de_fecha.date()
         fecha_py = date(qdate.year(), qdate.month(), qdate.day())
 
+        if self.chk_consumo_inmediato.isChecked():
+            fecha_programada_py = None   # mismo día → no guardar diferencia
+        else:
+            qd_prog = self.de_fecha_programada.date()
+            fecha_programada_py = date(qd_prog.year(), qd_prog.month(), qd_prog.day())
+            # Si eligieron la misma fecha, no tiene sentido guardarla
+            if fecha_programada_py == fecha_py:
+                fecha_programada_py = None
+
         session = SessionLocal()
         try:
             factura = Factura(
                 numero_factura=num,
                 fecha=fecha_py,
+                fecha_programada=fecha_programada_py,
                 proveedor=proveedor,
                 ejecucion_id=self._ejecucion_id,
             )
@@ -683,6 +722,9 @@ class ComprasWidget(QWidget):
         self.tbl_temp.setRowCount(0)
         self.le_num_factura.clear()
         self.cb_proveedor.setCurrentText("")
+        self.chk_consumo_inmediato.setChecked(True)
+        self.de_fecha_programada.setDate(self.de_fecha.date())
+        self.de_fecha_programada.setEnabled(False)
         self._update_total_temp()
         self._reload_history()
         self._reload_autocomplete()
@@ -756,6 +798,7 @@ class ComprasWidget(QWidget):
                 "id": factura.id,
                 "numero_factura": factura.numero_factura,
                 "fecha": factura.fecha,
+                "fecha_programada": factura.fecha_programada,
                 "proveedor": factura.proveedor,
             }
         finally:
@@ -817,7 +860,7 @@ class _FacturaDetailDialog(QDialog):
             self._le_num = QLineEdit(self._factura_data["numero_factura"])
             g.addWidget(self._le_num, 0, 1)
 
-            g.addWidget(QLabel("FECHA:"), 0, 2)
+            g.addWidget(QLabel("FECHA COMPRA:"), 0, 2)
             self._de_fecha = _make_date_edit()
             f = self._factura_data["fecha"]
             if f:
@@ -826,7 +869,14 @@ class _FacturaDetailDialog(QDialog):
 
             g.addWidget(QLabel("PROVEEDOR:"), 1, 0)
             self._le_prov = QLineEdit(self._factura_data["proveedor"])
-            g.addWidget(self._le_prov, 1, 1, 1, 3)
+            g.addWidget(self._le_prov, 1, 1)
+
+            g.addWidget(QLabel("FECHA PROGRAMADA:"), 1, 2)
+            self._de_fecha_prog = _make_date_edit()
+            fp = self._factura_data.get("fecha_programada") or self._factura_data["fecha"]
+            if fp:
+                self._de_fecha_prog.setDate(QDate(fp.year, fp.month, fp.day))
+            g.addWidget(self._de_fecha_prog, 1, 3)
 
             btn_save = QPushButton("💾 GUARDAR CAMBIOS")
             btn_save.setStyleSheet("background-color: #27ae60; color: white; padding: 6px;")
@@ -835,18 +885,26 @@ class _FacturaDetailDialog(QDialog):
         else:
             lbl_title = QLabel(f"FACTURA N° {self._factura_data['numero_factura']}")
             lbl_title.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
-            g.addWidget(lbl_title, 0, 0, 2, 1)
+            g.addWidget(lbl_title, 0, 0, 3, 1)
 
             fecha_str = (
                 self._factura_data["fecha"].strftime("%d/%m/%Y")
                 if self._factura_data["fecha"]
                 else ""
             )
-            g.addWidget(QLabel(f"<b>FECHA:</b> {fecha_str}"), 0, 1,
+            g.addWidget(QLabel(f"<b>FECHA COMPRA:</b> {fecha_str}"), 0, 1,
                         alignment=Qt.AlignmentFlag.AlignRight)
+
+            fecha_prog = self._factura_data.get("fecha_programada")
+            fecha_prog_str = fecha_prog.strftime("%d/%m/%Y") if fecha_prog else fecha_str
+            lbl_prog = QLabel(f"<b>FECHA PROGRAMADA:</b> {fecha_prog_str}")
+            if fecha_prog and fecha_prog != self._factura_data["fecha"]:
+                lbl_prog.setStyleSheet("color: #d35400; font-weight: bold;")
+            g.addWidget(lbl_prog, 1, 1, alignment=Qt.AlignmentFlag.AlignRight)
+
             g.addWidget(
                 QLabel(f"<b>PROVEEDOR:</b> {self._factura_data['proveedor']}"),
-                1, 1, alignment=Qt.AlignmentFlag.AlignRight,
+                2, 1, alignment=Qt.AlignmentFlag.AlignRight,
             )
 
         layout.addWidget(hdr)
@@ -914,6 +972,11 @@ class _FacturaDetailDialog(QDialog):
             return
         qd = self._de_fecha.date()
         nueva_fecha = date(qd.year(), qd.month(), qd.day())
+        qd_prog = self._de_fecha_prog.date()
+        nueva_fecha_prog = date(qd_prog.year(), qd_prog.month(), qd_prog.day())
+        # Si la fecha programada es igual a la de compra, guardar None (Consumo Inmediato)
+        if nueva_fecha_prog == nueva_fecha:
+            nueva_fecha_prog = None
 
         session = SessionLocal()
         try:
@@ -922,6 +985,7 @@ class _FacturaDetailDialog(QDialog):
                 factura.numero_factura = nuevo_num
                 factura.proveedor = nuevo_prov
                 factura.fecha = nueva_fecha
+                factura.fecha_programada = nueva_fecha_prog
                 session.commit()
                 QMessageBox.information(self, "Éxito", "Datos actualizados.")
                 self.accept()

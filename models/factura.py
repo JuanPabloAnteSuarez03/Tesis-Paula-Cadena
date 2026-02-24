@@ -7,11 +7,12 @@ from sqlalchemy.orm import relationship
 class Factura(Base):
     __tablename__ = "facturas"
 
-    id             = Column(Integer, primary_key=True, autoincrement=True)
-    numero_factura = Column(String, nullable=False)
-    fecha          = Column(Date, nullable=False)
-    proveedor      = Column(String, nullable=False, default="")
-    ejecucion_id   = Column(Integer, ForeignKey("ejecuciones.id"), nullable=True)
+    id                = Column(Integer, primary_key=True, autoincrement=True)
+    numero_factura    = Column(String, nullable=False)
+    fecha             = Column(Date, nullable=False)
+    fecha_programada  = Column(Date, nullable=True)   # None = Consumo Inmediato (= fecha)
+    proveedor         = Column(String, nullable=False, default="")
+    ejecucion_id      = Column(Integer, ForeignKey("ejecuciones.id"), nullable=True)
 
     # Relación N:1 con Ejecucion
     ejecucion = relationship("Ejecucion", back_populates="facturas")

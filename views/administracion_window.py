@@ -962,6 +962,20 @@ class AdministracionWindow(QDialog):
 
     # ---------- Auto adjust ----------
     def _on_auto_adjust(self):
+        # Protección: con costo directo en 0 cualquier ajuste escala todo a cero.
+        if float(self.costo_directo or 0.0) <= 0:
+            try:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(
+                    self,
+                    "Auto-ajustar",
+                    "El costo directo está en 0.\n"
+                    "Primero carga/actualiza el Presupuesto y luego vuelve a AIU."
+                )
+            except Exception:
+                pass
+            return
+
         admin_pct = self.admin_target_spin.value()
         if admin_pct <= 0:
             return

@@ -98,7 +98,7 @@ class SistemaContable(QMainWindow):
         if folder:
             self.carpeta_actual = folder
             self.nombre_obra = os.path.basename(folder).upper()
-            pd.DataFrame(columns=["Numero_Factura","Fecha","Proveedor","Insumo","Cantidad","Precio_Unit","Total"]).to_csv(os.path.join(self.carpeta_actual, self.file_mat), index=False)
+            pd.DataFrame(columns=["Numero_Factura","Fecha","Fecha_Uso","Proveedor","Insumo","Cantidad","Precio_Unit","Total"]).to_csv(os.path.join(self.carpeta_actual, self.file_mat), index=False)
             pd.DataFrame(columns=["Fecha","Trabajador","Cargo","Dias","Modo","Total","Observacion"]).to_csv(os.path.join(self.carpeta_actual, self.file_mo), index=False)
             self.actualizar_interfaz_obra()
             QMessageBox.information(self, "Éxito", f"Obra '{self.nombre_obra}' creada.")
@@ -215,8 +215,30 @@ class SistemaContable(QMainWindow):
         panel_izq = QWidget(); l_izq = QVBoxLayout(panel_izq)
         layout.addWidget(panel_izq, stretch=1)
 
-        grp_datos = QGroupBox("1. Datos Factura")
+        grp_datos = QGroupBox("1. Datos Factura y Uso")
         l_datos = QGridLayout(grp_datos)
+        self.var_fecha = QLineEdit(datetime.now().strftime("%d/%m/%Y"))
+        self.var_num_factura = QLineEdit()
+        self.var_proveedor = QComboBox(); self.var_proveedor.setEditable(True)
+
+        # El botoncito Check para la fecha
+        self.chk_misma_fecha = QCheckBox("Consumo Inmediato")
+        self.chk_misma_fecha.setChecked(True)
+        self.var_fecha_uso = QLineEdit(datetime.now().strftime("%d/%m/%Y"))
+        self.var_fecha_uso.setEnabled(False) 
+
+        self.chk_misma_fecha.toggled.connect(lambda est: [
+        self.var_fecha_uso.setEnabled(not est),
+        self.var_fecha_uso.setText(self.var_fecha.text()) if est else None
+    ])
+
+        l_datos.addWidget(QLabel("Fecha Factura:"), 0, 0); l_datos.addWidget(self.var_fecha, 0, 1)
+        l_datos.addWidget(QLabel("N° Factura:"), 0, 2); l_datos.addWidget(self.var_num_factura, 0, 3)
+        l_datos.addWidget(QLabel("Proveedor:"), 1, 0); l_datos.addWidget(self.var_proveedor, 1, 1, 1, 3)
+        l_datos.addWidget(self.chk_misma_fecha, 2, 0, 1, 2)
+        l_datos.addWidget(QLabel("Fecha Programada:"), 2, 2); l_datos.addWidget(self.var_fecha_uso, 2, 3)
+        l_izq.addWidget(grp_datos)
+
         self.var_fecha = QLineEdit(datetime.now().strftime("%d/%m/%Y"))
         self.var_num_factura = QLineEdit()
         self.var_proveedor = QComboBox(); self.var_proveedor.setEditable(True)
@@ -427,6 +449,7 @@ class SistemaContable(QMainWindow):
             datos.append({
                 "Numero_Factura": self.var_num_factura.text().upper(), 
                 "Fecha": self.var_fecha.text(), 
+                "Fecha_Uso": self.var_fecha.text() if self.chk_misma_fecha.isChecked() else self.var_fecha_uso.text(),
                 "Proveedor": self.var_proveedor.currentText().upper(), 
                 "Insumo": i["Insumo"], 
                 "Cantidad": i["Cantidad"], 
@@ -474,6 +497,10 @@ class SistemaContable(QMainWindow):
                     self.tabla_hist_mat.setItem(row_idx, 2, QTableWidgetItem(str(r["Proveedor"])))
                     self.tabla_hist_mat.setItem(row_idx, 3, QTableWidgetItem(str(r["Insumo"])))
                     self.tabla_hist_mat.setItem(row_idx, 4, QTableWidgetItem(f"${float(r['Total']):,.0f}"))
+
+                    if "Fecha_Uso" in df.columns and str(r["Fecha"]) != str(r["Fecha_Uso"]):
+                        for c in range(5): self.tabla_hist_mat.item(row_idx, c).setBackground(QColor("#fcf3cf"))
+
                     t += float(r["Total"])
                     
                 self.lbl_total_mat.setText(f"Acumulado: $ {t:,.0f}")
@@ -503,6 +530,9 @@ class SistemaContable(QMainWindow):
                     self.tabla_hist_mat.setItem(row_idx, 2, QTableWidgetItem(str(r["Proveedor"])))
                     self.tabla_hist_mat.setItem(row_idx, 3, QTableWidgetItem(str(r["Insumo"])))
                     self.tabla_hist_mat.setItem(row_idx, 4, QTableWidgetItem(f"${float(r['Total']):,.0f}"))
+
+                    if "Fecha_Uso" in df.columns and str(r["Fecha"]) != str(r["Fecha_Uso"]):
+                        for c in range(5): self.tabla_hist_mat.item(row_idx, c).setBackground(QColor("#fcf3cf"))
             except: pass
 
     def eliminar_factura(self):
@@ -568,6 +598,7 @@ class SistemaContable(QMainWindow):
         
         if items.empty: return
         fecha_val = items.iloc[0]["Fecha"]
+        fecha_uso_val = items.iloc[0].get("Fecha_Uso", fecha_val)
 
         dialog = QDialog(self)
         dialog.setWindowTitle(f"EDITAR DATOS FACTURA {num_orig}" if modo_edicion else f"Detalle de Factura N° {num_orig}")
@@ -582,13 +613,19 @@ class SistemaContable(QMainWindow):
             ent_num = QLineEdit(num_orig); hl.addWidget(ent_num, 0, 1)
             hl.addWidget(QLabel("FECHA:"), 0, 2)
             ent_fecha = QLineEdit(fecha_val); hl.addWidget(ent_fecha, 0, 3)
-            hl.addWidget(QLabel("PROVEEDOR:"), 1, 0)
-            ent_prov = QLineEdit(prov_orig); hl.addWidget(ent_prov, 1, 1, 1, 3)
             
+
+            hl.addWidget(QLabel("PROVEEDOR:"), 1, 0)
+            ent_prov = QLineEdit(prov_orig); hl.addWidget(ent_prov, 1, 1)
+            hl.addWidget(QLabel("Fecha Programada"), 1, 2)
+            ent_fecha_uso = QLineEdit(str(fecha_uso_val)); hl.addWidget(ent_fecha_uso, 1, 3)
+
             def guardar_cambios():
                 nuevo_num = ent_num.text().upper().strip()
                 nueva_fecha = ent_fecha.text().strip()
+                nueva_fecha_uso = ent_fecha_uso.text().strip()
                 nuevo_prov = ent_prov.text().upper().strip()
+
                 if not nuevo_num or not nuevo_prov: return
                 
                 df_edit = pd.read_csv(ruta_archivo).fillna("")
@@ -612,9 +649,16 @@ class SistemaContable(QMainWindow):
         else:
             lbl_title = QLabel(f"FACTURA N° {num_orig}")
             lbl_title.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
-            hl.addWidget(lbl_title, 0, 0, 2, 1)
-            hl.addWidget(QLabel(f"<b>FECHA:</b> {fecha_val}"), 0, 1, alignment=Qt.AlignmentFlag.AlignRight)
-            hl.addWidget(QLabel(f"<b>PROVEEDOR:</b> {prov_orig}"), 1, 1, alignment=Qt.AlignmentFlag.AlignRight)
+            hl.addWidget(lbl_title, 0, 0, 3, 1)
+            
+            hl.addWidget(QLabel(f"<b>FECHA COMPRA:</b> {fecha_val}"), 0, 1, alignment=Qt.AlignmentFlag.AlignRight)
+
+            lbl_prog = QLabel(f"<b>FECHA PROGRAMADA:</b> {fecha_uso_val}")
+            if fecha_val != fecha_uso_val: 
+                lbl_prog.setStyleSheet("color: #d35400; font-weight: bold;")
+            hl.addWidget(lbl_prog, 1, 1, alignment=Qt.AlignmentFlag.AlignRight)
+
+            hl.addWidget(QLabel(f"<b>PROVEEDOR:</b> {prov_orig}"), 2, 1, alignment=Qt.AlignmentFlag.AlignRight)
 
         tabla_diag = QTableWidget(0, 6)
         tabla_diag.setHorizontalHeaderLabels(["Insumo", "Cant", "Vr. Unit", "IVA", "Subtotal", "Total Neto"])
@@ -823,7 +867,9 @@ class SistemaContable(QMainWindow):
             ruta_mat = self.ruta(self.file_mat)
             if os.path.exists(ruta_mat):
                 df_mat = pd.read_csv(ruta_mat)
-                df_mat['Fecha_DT'] = pd.to_datetime(df_mat['Fecha'], dayfirst=True, errors='coerce')
+                if 'Fecha_Uso' not in df_mat.columns:
+                    df_mat['Fecha_Uso'] = df_mat['Fecha']
+                df_mat['Fecha_DT'] = pd.to_datetime(df_mat['Fecha_Uso'], dayfirst=True, errors='coerce')
                 gastos_validos = df_mat[df_mat['Fecha_DT'] <= fecha_corte_pd]
                 total_ac += gastos_validos['Total'].sum()
                 
@@ -859,32 +905,84 @@ class SistemaContable(QMainWindow):
                 row_idx = self.tabla_evm_tareas.rowCount()
                 self.tabla_evm_tareas.insertRow(row_idx)
                 
-                # SE MANTIENEN LAS COLUMNAS 2 Y 5 EXACTAMENTE COMO ESTABAN
+                # 1. Capturamos los textos (RESPETANDO LOS ESPACIOS VACÍOS)
                 val_id = item_origen.text(0) if item_origen.text(0) else ""
                 val_nombre = item_origen.text(1).strip() if item_origen.text(1) else ""
-                val_plan = item_origen.text(2) if item_origen.text(2) else "0" 
-                val_ejec = item_origen.text(5) if item_origen.text(5) else "0"
+                val_plan_str = item_origen.text(2).strip() if item_origen.text(2) else "" 
+                por_esp_str = item_origen.text(4).strip() if item_origen.text(4) else ""
+                val_ejec = item_origen.text(5).strip() if item_origen.text(5) else ""
+                
+                # 2. Si es un capítulo, en blanco. Si tiene datos, calculamos.
+                if val_plan_str == "":
+                    val_plan_final = ""
+                else:
+                    try:
+                        p_limpio = "".join(c for c in val_plan_str.replace(",", ".") if c.isdigit() or c == ".")
+                        e_limpio = "".join(c for c in por_esp_str.replace(",", ".") if c.isdigit() or c == ".")
+                        
+                        if p_limpio.count('.') > 1:
+                            partes = p_limpio.rsplit('.', 1)
+                            p_limpio = partes[0].replace('.', '') + '.' + partes[1]
+                        if e_limpio.count('.') > 1:
+                            partes = e_limpio.rsplit('.', 1)
+                            e_limpio = partes[0].replace('.', '') + '.' + partes[1]
+
+                        if not p_limpio: p_limpio = "0"
+                        if not e_limpio: e_limpio = "0"
+                        
+                        plan_num = float(p_limpio)
+                        esp_num = float(e_limpio)
+                        
+                        cant_esperada_num = plan_num * (esp_num / 100.0)
+                        
+                        if cant_esperada_num.is_integer():
+                            val_plan_final = str(int(cant_esperada_num))
+                        else:
+                            val_plan_final = f"{cant_esperada_num:.2f}"
+                            
+                    except Exception:
+                        val_plan_final = val_plan_str
+
+                # --- LLENAMOS LA TABLA ---
                 
                 # 0. ID
                 self.tabla_evm_tareas.setItem(row_idx, 0, celda_bloqueada(val_id))
+                
                 # 1. Nombre 
                 self.tabla_evm_tareas.setItem(row_idx, 1, celda_bloqueada(val_nombre))
-                # 2. Cant. Plan 
-                item_plan = celda_bloqueada(val_plan)
+                
+                # 2. Cant. Plan (Esperada)
+                item_plan = celda_bloqueada(val_plan_final)
                 item_plan.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.tabla_evm_tareas.setItem(row_idx, 2, item_plan)
-                # 3. Valor Unit (¡ESTA ES LA ÚNICA EDITABLE!)
+                
+                # 3. Valor Unit (La editable)
                 item_unit = QTableWidgetItem("")
-                item_unit.setBackground(QColor("#fffbcc")) 
+                if val_plan_final != "":
+                    item_unit.setBackground(QColor("#fffbcc")) 
                 self.tabla_evm_tareas.setItem(row_idx, 3, item_unit) 
+                
                 # 4. Valor Plan 
                 self.tabla_evm_tareas.setItem(row_idx, 4, celda_bloqueada("")) 
+                
                 # 5. Cant. Ejec.
                 item_ejec = celda_bloqueada(val_ejec)
                 item_ejec.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.tabla_evm_tareas.setItem(row_idx, 5, item_ejec) 
+                
                 # 6. Valor Ejec. 
                 self.tabla_evm_tareas.setItem(row_idx, 6, celda_bloqueada("")) 
+
+                # --- 3. TOQUE PRO: NEGRILLA PARA LOS CAPÍTULOS ---
+                if val_plan_str == "":
+                    font_capitulo = QFont()
+                    font_capitulo.setBold(True)
+                    # Recorremos las 7 columnas de esa fila para ponerlas en negrilla
+                    for col in range(7):
+                        celda = self.tabla_evm_tareas.item(row_idx, col)
+                        if celda:
+                            celda.setFont(font_capitulo)
+
         else:
             print("No se encontró 'self.tree' en el cronograma")
 

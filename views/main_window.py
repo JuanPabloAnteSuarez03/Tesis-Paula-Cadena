@@ -3,7 +3,7 @@ import sys
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, 
     QPushButton, QStackedWidget, QSplitter, QSizePolicy, QFrame, QComboBox,
-    QLabel, QScrollArea, QGroupBox, QAbstractButton
+    QLabel, QScrollArea, QGroupBox, QAbstractButton, QTabBar
 )
 from PyQt6.QtCore import Qt, QTimer
 from .presupuesto_view import PresupuestoView
@@ -159,10 +159,11 @@ class MainWindow(QMainWindow):
         self.left_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.center_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.right_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.center_panel.setMinimumWidth(0)
         
         # Crear splitters para permitir ajustar tamaños
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.main_splitter.setChildrenCollapsible(False)  # Evita que los paneles se colapsen a cero
+        self.main_splitter.setChildrenCollapsible(True)  # Permite colapsar paneles sin forzar ancho mínimo total
         self.main_splitter.setHandleWidth(8)  # Hacer el separador más ancho y fácil de agarrar
         
         # Agregar los paneles al splitter principal
@@ -250,16 +251,35 @@ class MainWindow(QMainWindow):
         return widget
 
     def on_mode_changed(self, idx: int):
-        text = self.mode_select.currentText()
+        text = self._tab_names[idx] if 0 <= idx < len(self._tab_names) else "Presupuesto"
+
+        # ── Paneles laterales: solo visibles en la pestaña Presupuesto ──────
+        is_presupuesto = (text == "Presupuesto")
+
+        if is_presupuesto:
+            # Siempre abrir ambos paneles laterales al entrar a Presupuesto
+            self._left_vis = True
+            self._right_vis = True
+            self.toggle_left_btn.setVisible(True)
+            self.toggle_right_btn.setVisible(True)
+            self._apply_main_splitter_layout(show_left=True, show_right=True)
+        else:
+            # Guardar estado antes de ocultar
+            self._left_vis = self.left_panel.isVisible()
+            self._right_vis = self.right_panel.isVisible()
+            self.toggle_left_btn.setVisible(False)
+            self.toggle_right_btn.setVisible(False)
+            self._apply_main_splitter_layout(show_left=False, show_right=False)
+
         if text == "Presupuesto":
             self.center_stack.setCurrentWidget(self.presupuesto_controller.view)
         elif text == "AIU":
+            direct_cost = float(getattr(self.presupuesto_controller.view, 'direct_cost_total', 0.0) or 0.0)
             # Crear perezosamente la ventana AIU embebida si no existe
             if self.aiu_widget is None:
                 from views.administracion_window import AdministracionWindow
                 # Construir un widget contenedor para embeber el diálogo
                 # Se crea con costo directo actual
-                direct_cost = getattr(self.presupuesto_controller.view, 'direct_cost_total', 0.0)
                 # Obtener profesionales desde BD igual que en PresupuestoView
                 try:
                     from models.database import SessionLocal
@@ -286,6 +306,13 @@ class MainWindow(QMainWindow):
                 aiu.aiu_computed.connect(lambda data: self._on_aiu_from_embedded(data))
                 self.aiu_widget = aiu
                 self.center_stack.addWidget(self.aiu_widget)
+            else:
+                # Siempre sincronizar costo directo actual para evitar autoajuste con base desactualizada (0).
+                try:
+                    self.aiu_widget.costo_directo = direct_cost
+                    self.aiu_widget._recalculate()
+                except Exception:
+                    pass
             self.center_stack.setCurrentWidget(self.aiu_widget)
         elif text == "Análisis Unitario":
             if self.analisis_presupuesto_widget is None:
@@ -346,7 +373,7 @@ class MainWindow(QMainWindow):
         panel = QFrame()
         panel.setFrameShape(QFrame.Shape.StyledPanel)
         panel.setFrameShadow(QFrame.Shadow.Raised)
-        panel.setMinimumWidth(300)
+        panel.setMinimumWidth(0)
         panel.setMaximumWidth(500)
         
         if side == "izquierdo":
@@ -396,38 +423,59 @@ class MainWindow(QMainWindow):
             }
         """)
         self.toggle_left_btn.clicked.connect(self.toggle_left_panel)
-        
-        # Selector central de modo
-        self.mode_select = QComboBox()
-        self.mode_select.addItems(["Presupuesto", "AIU", "Análisis Unitario", "Ejecución (Gastos)", "Cronograma", "Control EVM (Valor Ganado)"])
-        self.mode_select.setCurrentIndex(0)
-        self.mode_select.currentIndexChanged.connect(self.on_mode_changed)
-        # Estilo tipo botón azul con flecha blanca
-        self.mode_select.setStyleSheet(
-            """
-            QComboBox {
-                background-color: #007ACC;
-                color: white;
-                padding: 6px 28px 6px 10px;
-                border-radius: 4px;
-                border: 0.55px solid #005A9E;
-                font-weight: 600;
+
+        # ── Tab bar de navegación (reemplaza el QComboBox) ────────────────────
+        self._tab_names = [
+            "Presupuesto",
+            "AIU",
+            "Análisis Unitario",
+            "Ejecución (Gastos)",
+            "Cronograma",
+            "Control EVM (Valor Ganado)",
+        ]
+        self._tab_labels = [
+            "📊  Presupuesto",
+            "💼  AIU",
+            "🔬  Análisis Unitario",
+            "💰  Ejecución (Gastos)",
+            "📅  Cronograma",
+            "📈  Control EVM (Valor Ganado)",
+        ]
+        self.mode_tabs = QTabBar()
+        for name in self._tab_labels:
+            self.mode_tabs.addTab(name)
+        self.mode_tabs.setCurrentIndex(0)
+        self.mode_tabs.setExpanding(False)      # no estirar; alinear a la izquierda
+        self.mode_tabs.setDrawBase(False)       # sin línea base extra
+        self.mode_tabs.setStyleSheet("""
+            QTabBar {
+                background: transparent;
             }
-            QComboBox:hover { background-color: #005A9E; }
-            QComboBox::drop-down {
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 22px;
+            QTabBar::tab {
+                background: transparent;
+                color: rgba(255, 255, 255, 0.70);
+                padding: 8px 16px;
                 border: none;
+                border-bottom: 3px solid transparent;
+                font-weight: bold;
+                font-size: 12px;
+                margin: 0 1px;
             }
-            QComboBox::down-arrow {
-                image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24'><path fill='%23ffffff' d='M7 10l5 5 5-5z'/></svg>");
-                width: 12px;
-                height: 12px;
+            QTabBar::tab:selected {
+                color: white;
+                border-bottom: 3px solid white;
             }
-            """
-        )
-        
+            QTabBar::tab:hover:!selected {
+                color: white;
+                background: rgba(255, 255, 255, 0.15);
+                border-radius: 4px;
+            }
+        """)
+        self.mode_tabs.currentChanged.connect(self.on_mode_changed)
+
+        # Mantener mode_select como alias por compatibilidad (no se muestra)
+        self.mode_select = self.mode_tabs   # alias para no romper código externo
+
         # Botón para mostrar/ocultar panel derecho (análisis)
         self.toggle_right_btn = QPushButton("Análisis ≡")
         self.toggle_right_btn.setStyleSheet("""
@@ -444,10 +492,10 @@ class MainWindow(QMainWindow):
             }
         """)
         self.toggle_right_btn.clicked.connect(self.toggle_right_panel)
-        
+
         # Agregar widgets a la barra superior
         top_bar_layout.addWidget(self.toggle_left_btn)
-        top_bar_layout.addWidget(self.mode_select, 1)  # expansible
+        top_bar_layout.addWidget(self.mode_tabs, 1)   # expansible
         top_bar_layout.addWidget(self.toggle_right_btn)
         
         # Agregar barra superior al panel central
@@ -499,7 +547,7 @@ class MainWindow(QMainWindow):
                 border-radius: 4px;
             }
         """)
-        close_btn.clicked.connect(lambda: self.left_panel.setVisible(False))
+        close_btn.clicked.connect(self._hide_left_panel)
         
         left_title_layout.addWidget(close_btn)
         
@@ -764,7 +812,7 @@ class MainWindow(QMainWindow):
                 border-radius: 4px;
             }
         """)
-        close_btn.clicked.connect(lambda: self.right_panel.setVisible(False))
+        close_btn.clicked.connect(self._hide_right_panel)
         
         right_title_layout.addWidget(close_btn)
         
@@ -779,20 +827,52 @@ class MainWindow(QMainWindow):
         # Cargar controlador de análisis unitarios
         self.load_analysis()
 
+    def _apply_main_splitter_layout(self, show_left: bool, show_right: bool):
+        """Aplica visibilidad + tamaños del splitter principal de forma consistente."""
+        # Evita que paneles ocultos sigan imponiendo ancho mínimo al layout.
+        self.left_panel.setMinimumWidth(260 if show_left else 0)
+        self.right_panel.setMinimumWidth(260 if show_right else 0)
+        self.center_panel.setMinimumWidth(0)
+
+        self.left_panel.setVisible(show_left)
+        self.right_panel.setVisible(show_right)
+
+        sizes = self.main_splitter.sizes()
+        total = sum(sizes)
+        if total <= 0:
+            total = max(1200, self.width())
+
+        if show_left and show_right:
+            left = int(total * 0.22)
+            right = int(total * 0.22)
+            center = max(300, total - left - right)
+            self.main_splitter.setSizes([left, center, right])
+        elif show_left and not show_right:
+            left = int(total * 0.28)
+            center = max(300, total - left)
+            self.main_splitter.setSizes([left, center, 0])
+        elif not show_left and show_right:
+            right = int(total * 0.28)
+            center = max(300, total - right)
+            self.main_splitter.setSizes([0, center, right])
+        else:
+            self.main_splitter.setSizes([0, total, 0])
+
+    def _hide_left_panel(self):
+        """Oculta panel izquierdo y redistribuye splitter sin artefactos visuales."""
+        self._left_vis = False
+        self._apply_main_splitter_layout(show_left=False, show_right=self.right_panel.isVisible())
+
+    def _hide_right_panel(self):
+        """Oculta panel derecho y redistribuye splitter sin artefactos visuales."""
+        self._right_vis = False
+        self._apply_main_splitter_layout(show_left=self.left_panel.isVisible(), show_right=False)
+
     def toggle_left_panel(self):
         """Muestra u oculta el panel izquierdo de recursos."""
         visible = not self.left_panel.isVisible()
-        self.left_panel.setVisible(visible)
-        
-        # Ajustar tamaños de splitter cuando se muestra/oculta
-        if visible:
-            sizes = self.main_splitter.sizes()
-            # Distribuir proporcionalmente: panel izquierdo toma 30% del espacio total
-            total_width = sum(sizes)
-            left_width = int(total_width * 0.3)
-            center_width = sizes[1] - (left_width if sizes[0] == 0 else 0)
-            right_width = sizes[2]
-            self.main_splitter.setSizes([left_width, center_width, right_width])
+        self._left_vis = visible
+        self._apply_main_splitter_layout(show_left=visible, show_right=self.right_panel.isVisible())
         if visible:
             try:
                 if self.ifc_3d_view_left is not None:
@@ -800,21 +880,12 @@ class MainWindow(QMainWindow):
                     self.ifc_3d_view_left.plotter.render()
             except Exception:
                 pass
-        
+
     def toggle_right_panel(self):
         """Muestra u oculta el panel derecho de análisis unitarios."""
         visible = not self.right_panel.isVisible()
-        self.right_panel.setVisible(visible)
-        
-        # Ajustar tamaños de splitter cuando se muestra/oculta
-        if visible:
-            sizes = self.main_splitter.sizes()
-            # Distribuir proporcionalmente: panel derecho toma 30% del espacio total
-            total_width = sum(sizes)
-            right_width = int(total_width * 0.3)
-            left_width = sizes[0]
-            center_width = sizes[1] - (right_width if sizes[2] == 0 else 0)
-            self.main_splitter.setSizes([left_width, center_width, right_width])
+        self._right_vis = visible
+        self._apply_main_splitter_layout(show_left=self.left_panel.isVisible(), show_right=visible)
     
     def load_resources(self):
         """Carga el controlador de recursos en el panel de recursos."""
