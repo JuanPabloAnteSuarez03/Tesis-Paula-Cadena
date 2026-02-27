@@ -1,3 +1,4 @@
+from pathlib import Path
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QFont
 from PyQt6.QtWidgets import (
@@ -9,9 +10,6 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QSpacerItem,
 )
-import os
-
-
 class StartWindow(QWidget):
     """
     Pantalla de inicio tipo "launcher" para mostrar el logo y un botón de arranque.
@@ -21,7 +19,7 @@ class StartWindow(QWidget):
 
     def __init__(self, logo_path: str | None = None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("App Presupuestos")
+        self.setWindowTitle("Control360")
         self.resize(520, 400)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
         self._drag_active = False
@@ -47,8 +45,19 @@ class StartWindow(QWidget):
             QPushButton:pressed { background-color: #1e40af; }
             """
         )
-        self.logo_path = logo_path or "logo.png"
+        self.logo_path = self._resolve_logo_path(logo_path)
         self._build_ui()
+
+    def _resolve_logo_path(self, logo_path: str | None) -> str:
+        if logo_path:
+            p = Path(logo_path)
+            if p.is_file():
+                return str(p)
+        # Usar logo oficial del proyecto por defecto.
+        project_logo = Path(__file__).resolve().parent.parent / "logo_control_360_S.png"
+        if project_logo.is_file():
+            return str(project_logo)
+        return ""
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -62,17 +71,21 @@ class StartWindow(QWidget):
         logo_label = QLabel()
         logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         pix = None
-        if self.logo_path and os.path.isfile(self.logo_path):
+        if self.logo_path:
             try:
                 pix = QPixmap(self.logo_path)
             except Exception:
                 pix = None
         if pix and not pix.isNull():
-            scaled = pix.scaled(180, 180, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            scaled = pix.scaled(
+                260,
+                160,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
             logo_label.setPixmap(scaled)
         else:
-            logo_label.setText("App Presupuestos")
-            logo_label.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
+            logo_label.setText("")
         logo_box.addWidget(logo_label)
 
         title = QLabel("Planificación y Presupuestos de Obra")

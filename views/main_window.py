@@ -1,11 +1,13 @@
 # views/main_window.py
 import sys
+from pathlib import Path
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, 
     QPushButton, QStackedWidget, QSplitter, QSizePolicy, QFrame, QComboBox,
     QLabel, QScrollArea, QGroupBox, QAbstractButton, QTabBar
 )
 from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QIcon
 from .presupuesto_view import PresupuestoView
 from .resource_list_view import ResourceListView
 from .analisis_unitarios_view import AnalisisUnitariosView
@@ -19,8 +21,9 @@ from controllers.presupuesto_analisis_unitario_controller import PresupuestoAnal
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("App Presupuestos - MVC")
+        self.setWindowTitle("Control360 - MVC")
         self.resize(1400, 800)
+        self._set_brand_icon()
         
         # Aplicar un estilo global a toda la aplicación
         
@@ -32,6 +35,14 @@ class MainWindow(QMainWindow):
                 app.installEventFilter(self)
         except Exception:
             pass
+
+    def _set_brand_icon(self):
+        logo_path = Path(__file__).resolve().parent.parent / "logo_control_360_A.png"
+        if logo_path.is_file():
+            try:
+                self.setWindowIcon(QIcon(str(logo_path)))
+            except Exception:
+                pass
 
     def _is_descendant_of(self, w: QWidget, parent: QWidget) -> bool:
         try:
@@ -400,12 +411,12 @@ class MainWindow(QMainWindow):
         
         # Barra superior con botones para mostrar/ocultar paneles laterales
         top_bar = QWidget()
-        top_bar.setMinimumHeight(50)
-        top_bar.setMaximumHeight(50)
+        top_bar.setMinimumHeight(64)
+        top_bar.setMaximumHeight(64)
         top_bar.setStyleSheet("background-color: #0078d7; color: white;")
         
         top_bar_layout = QHBoxLayout(top_bar)
-        top_bar_layout.setContentsMargins(10, 5, 10, 5)
+        top_bar_layout.setContentsMargins(12, 8, 12, 8)
         
         # Botón para mostrar/ocultar panel izquierdo (recursos)
         self.toggle_left_btn = QPushButton("≡ Recursos")
