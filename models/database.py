@@ -6,11 +6,11 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 # Datos de conexión (modo PostgreSQL para desarrollo)
-DB_NAME = "app_presupuestos"
-DB_USER = "postgres"
-DB_PASSWORD = "123Randy"
-DB_HOST = "localhost"
-DB_PORT = "5432"
+DB_NAME = os.getenv("DB_NAME", "app_presupuestos")
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", "5432")
 
 
 def _running_frozen() -> bool:
