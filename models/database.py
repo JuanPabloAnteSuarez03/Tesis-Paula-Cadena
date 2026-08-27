@@ -3,11 +3,11 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 # Datos de conexión
-DB_NAME = "app_presupuestos"
-DB_USER = "postgres"
-DB_PASSWORD = "123Randy"
-DB_HOST = "localhost"
-DB_PORT = "5432"
+DB_NAME = os.getenv("DB_NAME", "app_presupuestos")
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", "5432")
 
 # Forzar codificación del cliente para libpq antes de cualquier conexión
 os.environ.setdefault("PGCLIENTENCODING", "LATIN1")
